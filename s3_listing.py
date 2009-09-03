@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 import s3_signature
+import pycurl
+import time
+import cStringIO
+from xml.dom import minidom
 
-def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
+def list_objects(aws_access_key_id,aws_secret_key,bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 
 	if bucket.strip() == "": raise "You have to pass in  a bucket name"
 
+	#Build Base URI
 	uri = "http://"+bucket+".s3.amazonaws.com"
 	
 	#Check for params
@@ -22,43 +27,50 @@ def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 		uri += "?"
 		p = []
 		for param in params:
-			p.append(param+"="+params[param])
-		uri += "".join(p)
+			p.append(param+"="+str(params[param]))
+		uri += "&".join(p)
 		
-		
-		
-		$req = new HttpRequest($uri);
-		$req->setMethod(HTTP_METH_GET);
-		
-		//Create Headers
-		$headers = array(
-			'Date'=>gmdate("D, d M Y H:i:s T"),
-			'User-Agent'=>"S3 PHP Api");	
-		$headers['Authorization'] = $this->get_auth_header('GET',"/".$bucket."/",$headers);
-		
-		//Add Headers to request
-		$req->setHeaders($headers);
-		
-		//Do it
-		$response = $req->send();
-		
-		//Parse Object List
-		$response_xml = new SimpleXMLElement($response->getBody());
-		var_dump($response_xml);
-		$return = array();
-		foreach($response_xml->Contents As $object){
-		  $return[] = array(
-				"Key"=>(string) $object->Key,
-				"LastModified"=>(string) $object->LastModified,
-				"ETag"=>(string) $object->ETag,
-				"Size"=>(string) $object->Size,
-				"Owner"=>array(
-					 "ID"=>(string) $object->Owner->ID,
-					 "DisplayName"=>(string) $object->Owner->DisplayName
-				)
-		  );
-		}
-		
-		return $return;
-		
+	
+	#Create Headers
+	headers = {
+		'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+		'User-Agent':'S3 Python API'
 	}
+	headers['Authorization'] = s3_signature.get_auth_header(aws_access_key_id,aws_secret_key,'GET','/'+bucket+'/',headers)
+	
+	
+	#Initiate curl object
+	c = pycurl.Curl()
+	c.setopt(pycurl.URL, uri)
+	c.setopt(pycurl.HTTPHEADER, [h+": "+str(headers[h]) for h in headers])
+	c.setopt(pycurl.VERBOSE, 0)
+	
+	#Catch response
+	res = cStringIO.StringIO()
+	c.setopt(pycurl.WRITEFUNCTION, res.write)
+		
+	#Do It
+	c.perform()
+	c.close()
+		
+	#@TODO: Some error handling/parsing here!
+	
+	#print c.getinfo(pycurl.HTTP_CODE)
+	
+	dom = minidom.parseString(res.getvalue())
+	for content in dom.getElementsByTagName('Contents'):
+		print content.getElementsByTagName('Key')[0].firstChild.nodeValue
+		
+		#foreach($response_xml->Contents As $object){
+		#  $return[] = array(
+		#		"Key"=>(string) $object->Key,
+		#		"LastModified"=>(string) $object->LastModified,
+		#		"ETag"=>(string) $object->ETag,
+		#		"Size"=>(string) $object->Size,
+		#		"Owner"=>array(
+		#			 "ID"=>(string) $object->Owner->ID,
+		#			 "DisplayName"=>(string) $object->Owner->DisplayName
+		#		)
+		#  );
+		#}
+		

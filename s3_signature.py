@@ -49,7 +49,6 @@ def get_auth_header(aws_access_key_id,aws_secret_key,verb,path="",headers={}):
 	#Bucket + Object (without Query string, except for Sub-resources)
 	string_to_sign += path
 		
-		
 	#Generate signature
 	digest_encoded = base64.b64encode(
 		hmac.new(
