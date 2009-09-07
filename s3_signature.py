@@ -1,9 +1,10 @@
 #!/usr/bin/env python
+import s3_keys
 import base64
 import hashlib
 import hmac
 
-def get_auth_header(aws_access_key_id,aws_secret_key,verb,path="",headers={}):
+def get_auth_header(verb,path="",headers={}):
 
 	string_to_sign = "";
 		
@@ -31,6 +32,7 @@ def get_auth_header(aws_access_key_id,aws_secret_key,verb,path="",headers={}):
 		
 	#Add date
 	string_to_sign += headers['Date']+"\n"
+	del headers['Date']
 		
 		
 	#Add the rest of the headers
@@ -52,9 +54,9 @@ def get_auth_header(aws_access_key_id,aws_secret_key,verb,path="",headers={}):
 	#Generate signature
 	digest_encoded = base64.b64encode(
 		hmac.new(
-			aws_secret_key,string_to_sign.encode("utf-8"),hashlib.sha1
+			s3_keys.aws_secret_key,string_to_sign.encode("utf-8"),hashlib.sha1
 		).digest()
 	)
-	signature = "AWS "+aws_access_key_id+":"+digest_encoded
+	signature = "AWS "+s3_keys.aws_access_key_id+":"+digest_encoded
 		
 	return signature
