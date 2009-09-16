@@ -4,9 +4,10 @@ import base64
 import hashlib
 import hmac
 
-def get_auth_header(verb,path="",headers={}):
+def get_auth_header(verb,path="",dict_headers={}):
 
 	string_to_sign = "";
+	headers = dict_headers.copy()
 		
 	#Add Action (verb)
 	string_to_sign += str(verb)+"\n"
@@ -50,6 +51,7 @@ def get_auth_header(verb,path="",headers={}):
 	#Add path
 	#Bucket + Object (without Query string, except for Sub-resources)
 	string_to_sign += path
+	print string_to_sign
 		
 	#Generate signature
 	digest_encoded = base64.b64encode(

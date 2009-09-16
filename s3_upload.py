@@ -5,6 +5,7 @@ import pycurl
 import time
 import os
 import cStringIO
+import hashlib
 from xml.dom import minidom
 
 def upload_object(bucket,source_path="",destination_key="",content_type="text/plain",amz_acl="public-read"):
@@ -14,11 +15,16 @@ def upload_object(bucket,source_path="",destination_key="",content_type="text/pl
 	if os.path.exists(source_path) == False: raise "The file specified doesn't exist"
 	
 	#Build Base URI
-	uri = "http://"+bucket+".s3.amazonaws.com"
+	uri = "http://"+bucket+".s3.amazonaws.com/"+destination_key
 	
 	#Get checksum
-	h = os.popen(r"md5 -q "+file_path);
-	checksum = base64.b64encode(h.read().strip())
+	checksum = base64.b64encode(
+		hashlib.md5(
+			open(source_path, 'rb').read()
+		).digest()
+	)
+	
+	
 	
 	#Create Headers
 	headers = {
@@ -30,12 +36,22 @@ def upload_object(bucket,source_path="",destination_key="",content_type="text/pl
 	}
 	headers['Authorization'] = s3_signature.get_auth_header('PUT', '/'+bucket+'/'+destination_key, headers)
 	
+	print headers
+	
 	#Initiate curl object
 	c = pycurl.Curl()
 	c.setopt(pycurl.URL, uri)
 	c.setopt(pycurl.HTTPHEADER, [h+": "+str(headers[h]) for h in headers])
 	c.setopt(pycurl.VERBOSE, 0)
 	c.setopt(pycurl.HEADER, 1)
+	c.setopt(pycurl.UPLOAD, 1)
+	
+	#Read file for upload
+	c.setopt(pycurl.READFUNCTION, open(source_path, 'rb').read)
+	
+	# Set size of file to be uploaded.
+	filesize = os.path.getsize(source_path)
+	c.setopt(pycurl.INFILESIZE, filesize)
 	
 	#Catch response
 	res = cStringIO.StringIO()
