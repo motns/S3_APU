@@ -1,3 +1,4 @@
 *.kpf
 *.pyc
-s3_keys.py
+*.log
+s3_config.py
