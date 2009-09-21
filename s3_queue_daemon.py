@@ -23,14 +23,16 @@ class q_accept_th(threading.Thread):
 	debug_log_lock = threading.Lock()
 	
 	#Counter variables for total commands executed, and breakdowns
-	count_lock = threading.Lock()
+	stat_lock = threading.Lock()
 	total_count = 0
 	mkd_count = 0
 	upl_count = 0
 	get_count = 0
-	
+	time_started = time.time()
+
 	#The item list
 	queue = Queue.Queue()
+
 	
 	def __init__(self,client,id):
 		threading.Thread.__init__(self)
@@ -59,11 +61,11 @@ class q_accept_th(threading.Thread):
 					
 					#Increment counters
 					try:
-						q_accept_th.count_lock.acquire()
+						q_accept_th.stat_lock.acquire()
 						q_accept_th.total_count += 1
 						q_accept_th.mkd_count += 1
 					finally:
-						q_accept_th.count_lock.release()
+						q_accept_th.stat_lock.release()
 					
 					q_accept_th.queue.put_nowait(msg.split("|"))
 					
@@ -78,11 +80,11 @@ class q_accept_th(threading.Thread):
 					
 					#Increment counters
 					try:
-						q_accept_th.count_lock.acquire()
+						q_accept_th.stat_lock.acquire()
 						q_accept_th.total_count += 1
 						q_accept_th.upl_count += 1
 					finally:
-						q_accept_th.count_lock.release()
+						q_accept_th.stat_lock.release()
 						
 					q_accept_th.queue.put_nowait(msg.split("|"))
 					
@@ -97,11 +99,11 @@ class q_accept_th(threading.Thread):
 					
 					#Increment counters
 					try:
-						q_accept_th.count_lock.acquire()
+						q_accept_th.stat_lock.acquire()
 						q_accept_th.total_count += 1
 						q_accept_th.get_count += 1
 					finally:
-						q_accept_th.count_lock.release()
+						q_accept_th.stat_lock.release()
 					
 					item = q_accept_th.queue.get_nowait()
 					ret = '|'.join(item)
@@ -127,15 +129,16 @@ class q_accept_th(threading.Thread):
 				
 				#Get counters
 				try:
-					q_accept_th.count_lock.acquire()
+					q_accept_th.stat_lock.acquire()
 					
 					ret += "|total_cmd:"+str(q_accept_th.total_count)
 					ret += "|mkd_cmd:"+str(q_accept_th.mkd_count)
 					ret += "|upl_cmd:"+str(q_accept_th.upl_count)
 					ret += "|get_cmd:"+str(q_accept_th.get_count)
+					ret += "|uptime:"+str(time.time() - q_accept_th.time_started)
 					
 				finally:
-					q_accept_th.count_lock.release()
+					q_accept_th.stat_lock.release()
 				
 				self.client.send(base64.b64encode(ret))
 				
