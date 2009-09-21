@@ -22,6 +22,13 @@ class q_accept_th(threading.Thread):
 	error_log_lock = threading.Lock()
 	debug_log_lock = threading.Lock()
 	
+	#Counter variables for total commands executed, and breakdowns
+	count_lock = threading.Lock()
+	total_count = 0
+	mkd_count = 0
+	upl_count = 0
+	get_count = 0
+	
 	#The item list
 	queue = Queue.Queue()
 	
@@ -40,15 +47,24 @@ class q_accept_th(threading.Thread):
 			
 			#Validate instruction received
 			#
-			# mkdir - create folder in S3 (mkdir|path/to/dir)
-			# upload - upload file into S3 (upload|/path/to/file|/path/in/s3) 
-			# getone - pop out the last item in the queue
+			# mkd - create folder in S3 (mkd|path/to/dir)
+			# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
+			# get - pop out the last item in the queue
 			
 			cmd = msg[0:3]
 			q_accept_th.debug_step('Extracted command: '+cmd)
 			
 			if cmd == 'mkd':
 				try:
+					
+					#Increment counters
+					try:
+						q_accept_th.count_lock.acquire()
+						q_accept_th.total_count += 1
+						q_accept_th.mkd_count += 1
+					finally:
+						q_accept_th.count_lock.release()
+					
 					q_accept_th.queue.put_nowait(msg.split("|"))
 					
 					#Confirm
@@ -59,6 +75,15 @@ class q_accept_th(threading.Thread):
 				
 			elif cmd == 'upl':
 				try:
+					
+					#Increment counters
+					try:
+						q_accept_th.count_lock.acquire()
+						q_accept_th.total_count += 1
+						q_accept_th.upl_count += 1
+					finally:
+						q_accept_th.count_lock.release()
+						
 					q_accept_th.queue.put_nowait(msg.split("|"))
 					
 					#Confirm
@@ -69,11 +94,49 @@ class q_accept_th(threading.Thread):
 				
 			elif cmd == 'get':
 				try:
+					
+					#Increment counters
+					try:
+						q_accept_th.count_lock.acquire()
+						q_accept_th.total_count += 1
+						q_accept_th.get_count += 1
+					finally:
+						q_accept_th.count_lock.release()
+					
 					item = q_accept_th.queue.get_nowait()
 					ret = '|'.join(item)
 				except:
 					ret = ''
 					
+				self.client.send(base64.b64encode(ret))
+				
+			elif cmd == 'inf':
+				ret = ''
+				
+				#Get size of queue
+				try:
+					ret += 'qsize:'+str(q_accept_th.queue.qsize())
+				except: pass
+				
+				#Get number of active threads
+				try:
+					q_accept_th.list_lock.acquire()
+					ret += "|th_count:"+str(len(q_accept_th.tlist))
+				finally:
+					q_accept_th.list_lock.release()
+				
+				#Get counters
+				try:
+					q_accept_th.count_lock.acquire()
+					
+					ret += "|total_cmd:"+str(q_accept_th.total_count)
+					ret += "|mkd_cmd:"+str(q_accept_th.mkd_count)
+					ret += "|upl_cmd:"+str(q_accept_th.upl_count)
+					ret += "|get_cmd:"+str(q_accept_th.get_count)
+					
+				finally:
+					q_accept_th.count_lock.release()
+				
 				self.client.send(base64.b64encode(ret))
 				
 			else:
@@ -94,6 +157,7 @@ class q_accept_th(threading.Thread):
 		q_accept_th.list_lock.release()
 	
 	
+	@staticmethod
 	def newthread(client):
 		q_accept_th.debug_check('Creating new thread')
 		
@@ -102,7 +166,6 @@ class q_accept_th(threading.Thread):
 		q_accept_th.tlist.append(t)
 		q_accept_th.list_lock.release()
 		t.start()
-	newthread = staticmethod(newthread)
 	
 	#############################################################
 	## Logging
@@ -185,7 +248,7 @@ class S3QueueDaemon(s3_daemon.Daemon):
 		
 		#Set up socket for accepting connections
 		lstn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		lstn.bind(('127.0.0.1',19998))
+		lstn.bind((s3_config.queue_server_ip,s3_config.queue_server_port))
 		lstn.listen(5)
 		
 		q_accept_th.debug_check('Server up and listening')

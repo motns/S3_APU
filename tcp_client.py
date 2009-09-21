@@ -16,7 +16,8 @@ s.connect((host, port))
 print 'Connected...'
 print 'Sending instruction'
 
-cmd = 'get'
+#cmd = 'get'
+cmd = 'inf'
 #cmd = 'mkd|/tst/dir'
 #cmd = 'upl|/tst/dir/file.jpg'
 
