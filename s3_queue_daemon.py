@@ -44,8 +44,8 @@ class q_accept_th(threading.Thread):
 		
 		try:
 			
+			#Get a decode message
 			msg = base64.b64decode(self.client.recv(1024))
-			q_accept_th.debug_step('Received message: '+msg)
 			
 			#Validate instruction received
 			#
@@ -53,14 +53,11 @@ class q_accept_th(threading.Thread):
 			# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
 			# get - pop out the last item in the queue
 			# inf - get information of the current status of the Queue server
-			
 			cmd = msg[0:3]
-			q_accept_th.debug_step('Extracted command: '+cmd)
-			
 			if cmd == 'mkd':
 				try:
 					
-					#Increment counters
+					#Increment stat counters
 					try:
 						q_accept_th.stat_lock.acquire()
 						q_accept_th.total_count += 1
@@ -68,30 +65,31 @@ class q_accept_th(threading.Thread):
 					finally:
 						q_accept_th.stat_lock.release()
 					
-					q_accept_th.queue.put_nowait(msg.split("|"))
+					#Put in the Queue
+					q_accept_th.queue.put_nowait(msg.split("|")[0:2])
 					
-					#Confirm
-					qs = q_accept_th.queue.qsize()
-					self.client.send(base64.b64encode('ok - '+str(qs)))
+					#Send confirm
+					self.client.send(base64.b64encode('ok'))
+					
 				except:
 					self.client.send(base64.b64encode('fail'))
 				
 			elif cmd == 'upl':
 				try:
 					
-					#Increment counters
+					#Increment stat counters
 					try:
 						q_accept_th.stat_lock.acquire()
 						q_accept_th.total_count += 1
 						q_accept_th.upl_count += 1
 					finally:
 						q_accept_th.stat_lock.release()
-						
-					q_accept_th.queue.put_nowait(msg.split("|"))
+				
+					#Put in the Queue 
+					q_accept_th.queue.put_nowait(msg.split("|")[0:2])
 					
-					#Confirm
-					qs = q_accept_th.queue.qsize()
-					self.client.send(base64.b64encode('ok - '+str(qs)))
+					#Send confirm
+					self.client.send(base64.b64encode('ok'))
 				except:
 					self.client.send(base64.b64encode('fail'))
 				
@@ -107,13 +105,13 @@ class q_accept_th(threading.Thread):
 				#Let's not go crazy!
 				if loop > 10: loop = 10
 				
+				#Try to get the requested number of items
 				item_list = []
-				
 				for i in range(loop):
 					
 					try:
 					
-						#Increment counters
+						#Increment stat counters
 						try:
 							q_accept_th.stat_lock.acquire()
 							q_accept_th.total_count += 1
@@ -123,7 +121,8 @@ class q_accept_th(threading.Thread):
 						
 						
 						#Only do timeouts if it's the first iteration
-						# We don't want to waste time when we already have something in our list
+						#  We don't want to waste time when we already have
+						#  something in our list to work with
 						if i == 0:
 							item = q_accept_th.queue.get(True, 20)
 						else:
@@ -133,17 +132,17 @@ class q_accept_th(threading.Thread):
 						
 					except: pass
 				
-				ret = ";".join(item_list)
-					
-				self.client.send(base64.b64encode(ret))
+				#Send back the joined list
+				self.client.send(base64.b64encode(";".join(item_list)))
 				
 			elif cmd == 'inf':
 				ret = ''
 				
-				#Get size of queue
+				#Get (approximate) size of queue
 				try:
 					ret += 'qsize:'+str(q_accept_th.queue.qsize())
-				except: pass
+				except:
+					ret += 'qsize:fail'
 				
 				#Get number of active threads
 				try:
@@ -152,7 +151,7 @@ class q_accept_th(threading.Thread):
 				finally:
 					q_accept_th.list_lock.release()
 				
-				#Get counters
+				#Get stat counter values
 				try:
 					q_accept_th.stat_lock.acquire()
 					
@@ -167,13 +166,13 @@ class q_accept_th(threading.Thread):
 				
 				self.client.send(base64.b64encode(ret))
 				
-			else:
+			else: #Nice try
 				self.client.send(base64.b64encode('invalid'))
 			
 		finally:
 			self.client.close() #Clean up after ourselves
 		
-		#Take ourselves off the list	
+		#Take ourselves off the thread list
 		q_accept_th.list_lock.acquire()
 		q_accept_th.tlist.remove(self)
 		
