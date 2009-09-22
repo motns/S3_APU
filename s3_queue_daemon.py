@@ -52,6 +52,7 @@ class q_accept_th(threading.Thread):
 			# mkd - create folder in S3 (mkd|path/to/dir)
 			# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
 			# get - pop out the last item in the queue
+			# inf - get information of the current status of the Queue server
 			
 			cmd = msg[0:3]
 			q_accept_th.debug_step('Extracted command: '+cmd)
@@ -95,20 +96,44 @@ class q_accept_th(threading.Thread):
 					self.client.send(base64.b64encode('fail'))
 				
 			elif cmd == 'get':
+				
+				#Check if we have multiple items to retrieve
+				params = msg.split("|")
 				try:
-					
-					#Increment counters
-					try:
-						q_accept_th.stat_lock.acquire()
-						q_accept_th.total_count += 1
-						q_accept_th.get_count += 1
-					finally:
-						q_accept_th.stat_lock.release()
-					
-					item = q_accept_th.queue.get_nowait()
-					ret = '|'.join(item)
+					loop = int(params[1] if len(params) == 2 else 1)
 				except:
-					ret = ''
+					loop = 1
+				
+				#Let's not go crazy!
+				if loop > 10: loop = 10
+				
+				item_list = []
+				
+				for i in range(loop):
+					
+					try:
+					
+						#Increment counters
+						try:
+							q_accept_th.stat_lock.acquire()
+							q_accept_th.total_count += 1
+							q_accept_th.get_count += 1
+						finally:
+							q_accept_th.stat_lock.release()
+						
+						
+						#Only do timeouts if it's the first iteration
+						# We don't want to waste time when we already have something in our list
+						if i == 0:
+							item = q_accept_th.queue.get(True, 20)
+						else:
+							item = q_accept_th.queue.get_nowait()
+							
+						item_list.append('|'.join(item))
+						
+					except: pass
+				
+				ret = ";".join(item_list)
 					
 				self.client.send(base64.b64encode(ret))
 				
