@@ -44,130 +44,137 @@ class q_accept_th(threading.Thread):
 		
 		try:
 			
-			#Get a decode message
-			msg = base64.b64decode(self.client.recv(1024))
-			
-			#Validate instruction received
-			#
-			# mkd - create folder in S3 (mkd|path/to/dir)
-			# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
-			# get - pop out the last item in the queue
-			# inf - get information of the current status of the Queue server
-			cmd = msg[0:3]
-			if cmd == 'mkd':
-				try:
-					
-					#Increment stat counters
+			#While there's instructions coming
+			while True:
+				
+				#Get and decode message
+				msg = base64.b64decode(self.client.recv(1024))
+				
+				q_accept_th.debug_step('Got message: '+msg)
+				
+				#Validate instruction received
+				#
+				# mkd - create folder in S3 (mkd|path/to/dir)
+				# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
+				# get - pop out the last item in the queue
+				# inf - get information of the current status of the Queue server
+				cmd = msg[0:3]
+				if cmd == 'mkd':
 					try:
-						q_accept_th.stat_lock.acquire()
-						q_accept_th.total_count += 1
-						q_accept_th.mkd_count += 1
-					finally:
-						q_accept_th.stat_lock.release()
-					
-					#Put in the Queue
-					q_accept_th.queue.put_nowait(msg.split("|")[0:2])
-					
-					#Send confirm
-					self.client.send(base64.b64encode('ok'))
-					
-				except:
-					self.client.send(base64.b64encode('fail'))
-				
-			elif cmd == 'upl':
-				try:
-					
-					#Increment stat counters
-					try:
-						q_accept_th.stat_lock.acquire()
-						q_accept_th.total_count += 1
-						q_accept_th.upl_count += 1
-					finally:
-						q_accept_th.stat_lock.release()
-				
-					#Put in the Queue 
-					q_accept_th.queue.put_nowait(msg.split("|")[0:2])
-					
-					#Send confirm
-					self.client.send(base64.b64encode('ok'))
-				except:
-					self.client.send(base64.b64encode('fail'))
-				
-			elif cmd == 'get':
-				
-				#Check if we have multiple items to retrieve
-				params = msg.split("|")
-				try:
-					loop = int(params[1] if len(params) == 2 else 1)
-				except:
-					loop = 1
-				
-				#Let's not go crazy!
-				if loop > 10: loop = 10
-				
-				#Try to get the requested number of items
-				item_list = []
-				for i in range(loop):
-					
-					try:
-					
+						
 						#Increment stat counters
 						try:
 							q_accept_th.stat_lock.acquire()
 							q_accept_th.total_count += 1
-							q_accept_th.get_count += 1
+							q_accept_th.mkd_count += 1
 						finally:
 							q_accept_th.stat_lock.release()
 						
+						#Put in the Queue
+						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
 						
-						#Only do timeouts if it's the first iteration
-						#  We don't want to waste time when we already have
-						#  something in our list to work with
-						if i == 0:
-							item = q_accept_th.queue.get(True, 20)
-						else:
-							item = q_accept_th.queue.get_nowait()
+						#Send confirm
+						self.client.send(base64.b64encode('ok'))
+						
+					except:
+						self.client.send(base64.b64encode('fail'))
+					
+				elif cmd == 'upl':
+					try:
+						
+						#Increment stat counters
+						try:
+							q_accept_th.stat_lock.acquire()
+							q_accept_th.total_count += 1
+							q_accept_th.upl_count += 1
+						finally:
+							q_accept_th.stat_lock.release()
+					
+						#Put in the Queue 
+						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
+						
+						#Send confirm
+						self.client.send(base64.b64encode('ok'))
+					except:
+						self.client.send(base64.b64encode('fail'))
+					
+				elif cmd == 'get':
+					
+					#Check if we have multiple items to retrieve
+					params = msg.split("|")
+					try:
+						loop = int(params[1] if len(params) == 2 else 1)
+					except:
+						loop = 1
+					
+					#Let's not go crazy!
+					if loop > 10: loop = 10
+					
+					#Try to get the requested number of items
+					item_list = []
+					for i in range(loop):
+						
+						try:
+						
+							#Increment stat counters
+							try:
+								q_accept_th.stat_lock.acquire()
+								q_accept_th.total_count += 1
+								q_accept_th.get_count += 1
+							finally:
+								q_accept_th.stat_lock.release()
 							
-						item_list.append('|'.join(item))
+							
+							#Only do timeouts if it's the first iteration
+							#  We don't want to waste time when we already have
+							#  something in our list to work with
+							if i == 0:
+								item = q_accept_th.queue.get(True, 20)
+							else:
+								item = q_accept_th.queue.get_nowait()
+								
+							item_list.append('|'.join(item))
+							
+						except: pass
+					
+					#Send back the joined list
+					self.client.send(base64.b64encode(";".join(item_list)))
+					
+				elif cmd == 'inf':
+					ret = ''
+					
+					#Get (approximate) size of queue
+					try:
+						ret += 'qsize:'+str(q_accept_th.queue.qsize())
+					except:
+						ret += 'qsize:fail'
+					
+					#Get number of active threads
+					try:
+						q_accept_th.list_lock.acquire()
+						ret += "|th_count:"+str(len(q_accept_th.tlist))
+					finally:
+						q_accept_th.list_lock.release()
+					
+					#Get stat counter values
+					try:
+						q_accept_th.stat_lock.acquire()
 						
-					except: pass
-				
-				#Send back the joined list
-				self.client.send(base64.b64encode(";".join(item_list)))
-				
-			elif cmd == 'inf':
-				ret = ''
-				
-				#Get (approximate) size of queue
-				try:
-					ret += 'qsize:'+str(q_accept_th.queue.qsize())
-				except:
-					ret += 'qsize:fail'
-				
-				#Get number of active threads
-				try:
-					q_accept_th.list_lock.acquire()
-					ret += "|th_count:"+str(len(q_accept_th.tlist))
-				finally:
-					q_accept_th.list_lock.release()
-				
-				#Get stat counter values
-				try:
-					q_accept_th.stat_lock.acquire()
+						ret += "|total_cmd:"+str(q_accept_th.total_count)
+						ret += "|mkd_cmd:"+str(q_accept_th.mkd_count)
+						ret += "|upl_cmd:"+str(q_accept_th.upl_count)
+						ret += "|get_cmd:"+str(q_accept_th.get_count)
+						ret += "|uptime:"+str(time.time() - q_accept_th.time_started)
+						
+					finally:
+						q_accept_th.stat_lock.release()
 					
-					ret += "|total_cmd:"+str(q_accept_th.total_count)
-					ret += "|mkd_cmd:"+str(q_accept_th.mkd_count)
-					ret += "|upl_cmd:"+str(q_accept_th.upl_count)
-					ret += "|get_cmd:"+str(q_accept_th.get_count)
-					ret += "|uptime:"+str(time.time() - q_accept_th.time_started)
+					self.client.send(base64.b64encode(ret))
 					
-				finally:
-					q_accept_th.stat_lock.release()
-				
-				self.client.send(base64.b64encode(ret))
-				
-			else: #Nice try
-				self.client.send(base64.b64encode('invalid'))
+				elif msg == '': #Client's done transmitting
+					break
+				else: #Nice try
+					self.client.send(base64.b64encode('invalid'))
 			
 		finally:
 			self.client.close() #Clean up after ourselves

@@ -16,13 +16,23 @@ s.connect((host, port))
 print 'Connected...'
 print 'Sending instruction'
 
-cmd = 'get|3'
+#cmd = 'get|3'
 #cmd = 'inf'
 #cmd = 'mkd|/tst/dir'
 #cmd = 'upl|/tst/dir/file.jpg'
 
-s.send(base64.b64encode(cmd))
-v = base64.b64decode(s.recv(1024))
-print v
+for i in range(1):
+	
+	#cmd = ''
+	#cmd = 'mkd|/tst/dir'
+	#cmd = 'upl|/tst/dir/file.jpg'
+	cmd = 'inf'
+	#cmd = 'get|3'
+	
+	s.send(base64.b64encode(cmd))
+	v = base64.b64decode(s.recv(1024))
+	print v
+
+
 
 s.close() # close socket
