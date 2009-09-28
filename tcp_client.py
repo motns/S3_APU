@@ -21,13 +21,13 @@ print 'Sending instruction'
 #cmd = 'mkd|/tst/dir'
 #cmd = 'upl|/tst/dir/file.jpg'
 
-for i in range(1):
+for i in range(10):
 	
 	#cmd = ''
 	#cmd = 'mkd|/tst/dir'
-	#cmd = 'upl|/tst/dir/file.jpg|dir/file.jpg'
+	cmd = 'upl|/tst/dir/file.jpg|dir/file.jpg'
 	#cmd = 'del|dir/file.jpg'
-	cmd = 'inf'
+	#cmd = 'inf'
 	#cmd = 'invalid'
 	#cmd = 'get|3'
 	

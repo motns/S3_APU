@@ -30,10 +30,9 @@ class worker_th(threading.Thread):
 	time_started = time.time()
 
 
-	def __init__(self,client,id):
+	def __init__(self,id):
 		threading.Thread.__init__(self)
 		self.threadnum = id # thread ID
-		self.client = client
 		
 	def run(self):
 		worker_th.debug_step('Thread ID '+str(self.threadnum)+" running")
@@ -44,6 +43,7 @@ class worker_th(threading.Thread):
 			
 			#Attempt to connect to Queue server up to 3 times (30 second intervals)
 			for i in range(3):
+				
 				try:
 					sock.connect((s3_config.queue_server_ip, s3_config.queue_server_port))
 					break
@@ -66,8 +66,11 @@ class worker_th(threading.Thread):
 		try:
 			
 			for i in range(6):
-				sock.send(base64.b64encode("get|"+worker_th.max_files))
-				ret = base64.b64decode(s.recv(2048))
+				
+				sock.send(base64.b64encode("get|"+str(worker_th.max_files)))
+				ret = base64.b64decode(sock.recv(2048))
+				
+				worker_th.debug_step('Got message: '+ret)
 				
 				#If there's no work to be done at the moment
 				if ret == "":
@@ -90,6 +93,9 @@ class worker_th(threading.Thread):
 		
 		############################
 		## UPLOADING HAPPENS HERE
+		for work in work_list:
+			worker_th.debug_step('Got work: '+work)
+		
 		
 		
 		#At the end, clean up after ourselves
@@ -114,15 +120,15 @@ class worker_th(threading.Thread):
 			worker_th.log_error("Error while finishing up thread execution (Perhaps problems with Event firing?)",3)
 		finally:
 			worker_th.list_lock.release()
-		
+
 
 
 	@staticmethod
-	def newthread(client):
+	def newthread():
 		worker_th.debug_check('Creating new thread')
 		
 		worker_th.list_lock.acquire()
-		t = worker_th(client, len(worker_th.tlist))
+		t = worker_th(len(worker_th.tlist))
 		worker_th.tlist.append(t)
 		worker_th.list_lock.release()
 		t.start()
@@ -141,7 +147,7 @@ class worker_th(threading.Thread):
 		else:
 			type = 'STEP'
 		
-		q_accept_th.debug_log_lock.acquire()
+		worker_th.debug_log_lock.acquire()
 		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+msg+"\n"
 		try:
 			f = file(s3_config.log_folder+'/s3_worker_debug.log','a+')
@@ -150,22 +156,22 @@ class worker_th(threading.Thread):
 			finally:
 				f.close()
 		except: pass
-		q_accept_th.debug_log_lock.release()
+		worker_th.debug_log_lock.release()
 	
 	#Debug log aliases
 	@staticmethod
 	def debug_check(msg):
-		q_accept_th.log_debug(msg,1)
+		worker_th.log_debug(msg,1)
 	
 	@staticmethod
 	def debug_step(msg):
-		q_accept_th.log_debug(msg,2)
+		worker_th.log_debug(msg,2)
 	
 	
 	#Log generic event to log
 	@staticmethod
 	def log_event(msg):
-		q_accept_th.event_log_lock.acquire()
+		worker_th.event_log_lock.acquire()
 		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"]: "+msg+"\n"
 		try:
 			f = file(s3_config.log_folder+'/s3_worker_event.log','a+')
@@ -174,7 +180,8 @@ class worker_th(threading.Thread):
 			finally:
 				f.close()
 		except: pass
-		q_accept_th.event_log_lock.release()
+		worker_th.event_log_lock.release()
+
 
 	#Log an error of a certain level (severity)
 	# level 1: Notice, or unexpected behaviour (non-fatal, recoverable)
@@ -182,7 +189,7 @@ class worker_th(threading.Thread):
 	# level 3: Error. (Fatal, non-recoverable)
 	@staticmethod
 	def log_error(msg,level=1):
-		q_accept_th.error_log_lock.acquire()
+		worker_th.error_log_lock.acquire()
 		
 		if level == 1:
 			type = 'NOTICE'
@@ -199,7 +206,7 @@ class worker_th(threading.Thread):
 			finally:
 				f.close()
 		except: pass
-		q_accept_th.error_log_lock.release()
+		worker_th.error_log_lock.release()
 		
 		
 
@@ -212,15 +219,21 @@ class S3WorkerDaemon(s3_daemon.Daemon):
 		while True:
 			
 			try:
-				worker_th.list_lock.acquire()
-				if len(worker_th.tlist) >= worker_th.maxthreads: #We're maxed out
+				try:
+					worker_th.list_lock.acquire()
+					if len(worker_th.tlist) >= worker_th.maxthreads: #We're maxed out
+						worker_th.list_lock.release()
+						worker_th.th_event.wait() #Wait for a thread to finish
+						
+				except:
+					worker_th.log_error('Error while testing available threads',3)
+					raise Exception("List lock error")
+				finally:
 					worker_th.list_lock.release()
-					worker_th.th_event.wait() #Wait for a thread to finish
 					
+				worker_th.newthread()
 			except:
-				worker_th.log_error('Error while testing available threads',3)
-			finally:
-				worker_th.list_lock.release()
+				worker_th.log_error('Error while setting up new thread',3)
 
 
 #########################################################################
