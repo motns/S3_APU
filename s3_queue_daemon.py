@@ -27,6 +27,7 @@ class q_accept_th(threading.Thread):
 	total_count = 0
 	mkd_count = 0
 	upl_count = 0
+	del_count = 0
 	get_count = 0
 	time_started = time.time()
 
@@ -56,8 +57,9 @@ class q_accept_th(threading.Thread):
 				#
 				# mkd - create folder in S3 (mkd|path/to/dir)
 				# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
-				# get - pop out the last item in the queue
-				# inf - get information of the current status of the Queue server
+				# del - delete file from S3 (del|/path/in/s3) 
+				# get - pop out and return the last item from the queue
+				# inf - get information on the current status of the Queue server
 				cmd = msg[0:3]
 				if cmd == 'mkd':
 					try:
@@ -77,6 +79,7 @@ class q_accept_th(threading.Thread):
 						self.client.send(base64.b64encode('ok'))
 						
 					except:
+						q_accept_th.log_error("'mkd' instruction failed: "+msg.strip().replace('\n',' '),2)
 						self.client.send(base64.b64encode('fail'))
 					
 				elif cmd == 'upl':
@@ -91,13 +94,36 @@ class q_accept_th(threading.Thread):
 							q_accept_th.stat_lock.release()
 					
 						#Put in the Queue 
+						q_accept_th.queue.put_nowait(msg.split("|")[0:3])
+						
+						#Send confirm
+						self.client.send(base64.b64encode('ok'))
+						
+					except:
+						q_accept_th.log_error("'upl' instruction failed: "+msg.strip().replace('\n',' '),2)
+						self.client.send(base64.b64encode('fail'))
+				
+				if cmd == 'del':
+					try:
+						
+						#Increment stat counters
+						try:
+							q_accept_th.stat_lock.acquire()
+							q_accept_th.total_count += 1
+							q_accept_th.del_count += 1
+						finally:
+							q_accept_th.stat_lock.release()
+						
+						#Put in the Queue
 						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
 						
 						#Send confirm
 						self.client.send(base64.b64encode('ok'))
+						
 					except:
+						q_accept_th.log_error("'del' instruction failed: "+msg.strip().replace('\n',' '),2)
 						self.client.send(base64.b64encode('fail'))
-					
+						
 				elif cmd == 'get':
 					
 					#Check if we have multiple items to retrieve
@@ -135,7 +161,8 @@ class q_accept_th(threading.Thread):
 								
 							item_list.append('|'.join(item))
 							
-						except: pass
+						except:
+							q_accept_th.log_error("'get' instruction failed: "+msg.strip().replace('\n',' '),2)
 					
 					#Send back the joined list
 					self.client.send(base64.b64encode(";".join(item_list)))
@@ -147,6 +174,7 @@ class q_accept_th(threading.Thread):
 					try:
 						ret += 'qsize:'+str(q_accept_th.queue.qsize())
 					except:
+						q_accept_th.log_error("Failed to get Queue size during 'inf' command",2)
 						ret += 'qsize:fail'
 					
 					#Get number of active threads
@@ -163,6 +191,7 @@ class q_accept_th(threading.Thread):
 						ret += "|total_cmd:"+str(q_accept_th.total_count)
 						ret += "|mkd_cmd:"+str(q_accept_th.mkd_count)
 						ret += "|upl_cmd:"+str(q_accept_th.upl_count)
+						ret += "|del_cmd:"+str(q_accept_th.del_count)
 						ret += "|get_cmd:"+str(q_accept_th.get_count)
 						ret += "|uptime:"+str(time.time() - q_accept_th.time_started)
 						
@@ -174,21 +203,27 @@ class q_accept_th(threading.Thread):
 				elif msg == '': #Client's done transmitting
 					break
 				else: #Nice try
+					q_accept_th.log_error('Invalid instruction received: '+msg.strip().replace('\n',' '),1)
 					self.client.send(base64.b64encode('invalid'))
+		except:
+			q_accept_th.log_error("Error while processing client instruction",3)
+		finally: #When client confirms End Of Transmission, or just disconnects
+			self.client.close()
+		
+		try:
+			#Take ourselves off the thread list
+			q_accept_th.list_lock.acquire()
+			q_accept_th.tlist.remove(self)
 			
+			#Do we need to call for a new thread?
+			if len(q_accept_th.tlist) == q_accept_th.maxthreads - 1:
+				q_accept_th.th_event.set()
+				q_accept_th.th_event.clear()
+				
+		except:
+			q_accept_th.log_error("Error while finishing up thread execution (Perhaps problems with Event firing?)",3)
 		finally:
-			self.client.close() #Clean up after ourselves
-		
-		#Take ourselves off the thread list
-		q_accept_th.list_lock.acquire()
-		q_accept_th.tlist.remove(self)
-		
-		#Do we need to call for a new thread?
-		if len(q_accept_th.tlist) == q_accept_th.maxthreads - 1:
-			q_accept_th.th_event.set()
-			q_accept_th.th_event.clear()
-			
-		q_accept_th.list_lock.release()
+			q_accept_th.list_lock.release()
 	
 	
 	@staticmethod
@@ -281,28 +316,47 @@ class S3QueueDaemon(s3_daemon.Daemon):
 	def run(self):
 		
 		#Set up socket for accepting connections
-		lstn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		lstn.bind((s3_config.queue_server_ip,s3_config.queue_server_port))
-		lstn.listen(5)
+		for i in range(3):
+			try:
+				lstn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				lstn.bind((s3_config.queue_server_ip,s3_config.queue_server_port))
+				lstn.listen(5)
+				break
+			except:
+				if i == 2:
+					q_accept_th.log_error('Queue server failed to initialize network socket connection. Shutting down...',3)
+					return
+				else:
+					q_accept_th.log_error('Queue server failed to bind to IP '+str(s3_config.queue_server_ip)+' on Port '+str(s3_config.queue_server_port),2)
+					time.sleep(30)
+		
 		
 		q_accept_th.debug_check('Server up and listening')
 		
 		while True:
-			q_accept_th.debug_step('Waiting for client')
 			
-			#Accept new connection
-			(client,ap) = lstn.accept()
-			q_accept_th.debug_step('Client connected')
-			
-			q_accept_th.list_lock.acquire()
-			if len(q_accept_th.tlist) >= q_accept_th.maxthreads: #We're maxed out
-				q_accept_th.debug_check('Reached max threads, waiting for one to free up')
-				q_accept_th.list_lock.release()
-				q_accept_th.th_event.wait() #Wait for a thread to finish
-			else:
-				q_accept_th.list_lock.release()
-			
-			q_accept_th.newthread(client)
+			try:
+				
+				#Accept new connection
+				(client,ap) = lstn.accept()
+				#q_accept_th.debug_step('Client connected')
+				
+				try:
+					
+					q_accept_th.list_lock.acquire()
+					if len(q_accept_th.tlist) >= q_accept_th.maxthreads: #We're maxed out
+						q_accept_th.log_error('Reached max threads, waiting for one to finish',2)
+						q_accept_th.list_lock.release()
+						q_accept_th.th_event.wait() #Wait for a thread to finish
+						
+				except:
+					q_accept_th.log_error('Error while testing available threads',3)
+				finally:
+					q_accept_th.list_lock.release()
+				
+				q_accept_th.newthread(client)
+				
+			except: q_accept_th.log_error('Error while setting up new client connection',3)
 
 
 #########################################################################

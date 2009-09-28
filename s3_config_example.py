@@ -17,3 +17,9 @@ log_folder = '/path/to/folder'
 # 1: Checkpoints
 # 2: Checkpoints + Steps
 debug_level = 0
+
+#Maximum worker threads
+max_workers = 3
+
+#Maximum number of files to attempt to upload in one go
+max_files = 3

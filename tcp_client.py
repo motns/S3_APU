@@ -25,8 +25,10 @@ for i in range(1):
 	
 	#cmd = ''
 	#cmd = 'mkd|/tst/dir'
-	#cmd = 'upl|/tst/dir/file.jpg'
+	#cmd = 'upl|/tst/dir/file.jpg|dir/file.jpg'
+	#cmd = 'del|dir/file.jpg'
 	cmd = 'inf'
+	#cmd = 'invalid'
 	#cmd = 'get|3'
 	
 	s.send(base64.b64encode(cmd))

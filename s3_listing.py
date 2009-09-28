@@ -52,11 +52,12 @@ def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 		
 	#Do It
 	c.perform()
-	c.close()
 		
 	#@TODO: Some error handling/parsing here!
-	
 	#print c.getinfo(pycurl.HTTP_CODE)
+	
+	c.close()
+	
 	response = res.getvalue().split("\r\n")
 	
 	#Get out headers and body
