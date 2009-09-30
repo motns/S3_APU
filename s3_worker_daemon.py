@@ -63,26 +63,31 @@ class worker_th(threading.Thread):
 		
 		
 		#Time to pick up some work
+		work_list = []
 		try:
 			
 			for i in range(6):
 				
-				sock.send(base64.b64encode("get|"+str(worker_th.max_files)))
-				ret = base64.b64decode(sock.recv(2048))
-				
-				worker_th.debug_step('Got message: '+ret)
+				sock.send(base64.b64encode("get|"+str(worker_th.max_files))+"\n")
+				ret = base64.b64decode(sock.recv(2048)).strip()
 				
 				#If there's no work to be done at the moment
 				if ret == "":
 					if i == 5:
 						#It's enough for now. Stop this thread and start a new one
+						self.cleanup()
 						return
 					else: #Retry in a bit
 						time.sleep(10)
+					
 				else:
-					work_list = ret.split(";")
+					if ret != "":
+						if ";" in ret:
+							work_list = ret.split(";")
+						else:
+							work_list.append(ret)
 					break
-		
+			
 		except:
 			worker_th.log_error("Error while getting and parsing work from Q Server",3)
 			self.cleanup()
@@ -95,7 +100,7 @@ class worker_th(threading.Thread):
 		## UPLOADING HAPPENS HERE
 		for work in work_list:
 			worker_th.debug_step('Got work: '+work)
-		
+			time.sleep(5)
 		
 		
 		#At the end, clean up after ourselves

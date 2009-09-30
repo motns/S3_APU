@@ -24,14 +24,14 @@ print 'Sending instruction'
 for i in range(10):
 	
 	#cmd = ''
-	#cmd = 'mkd|/tst/dir'
-	cmd = 'upl|/tst/dir/file.jpg|dir/file.jpg'
+	cmd = 'mkd|/tst/dir'
+	#cmd = 'upl|/tst/dir/file.jpg|dir/file.jpg'
 	#cmd = 'del|dir/file.jpg'
 	#cmd = 'inf'
 	#cmd = 'invalid'
 	#cmd = 'get|3'
 	
-	s.send(base64.b64encode(cmd))
+	s.send(base64.b64encode(cmd)+"\n")
 	v = base64.b64decode(s.recv(1024))
 	print v
 

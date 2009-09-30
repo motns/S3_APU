@@ -49,7 +49,7 @@ class q_accept_th(threading.Thread):
 			while True:
 				
 				#Get and decode message
-				msg = base64.b64decode(self.client.recv(1024))
+				msg = base64.b64decode(self.client.recv(1024)).strip()
 				
 				q_accept_th.debug_step('Got message: '+msg)
 				
@@ -76,11 +76,11 @@ class q_accept_th(threading.Thread):
 						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
 						
 						#Send confirm
-						self.client.send(base64.b64encode('ok'))
+						self.client.send(base64.b64encode('ok')+"\n")
 						
 					except:
 						q_accept_th.log_error("'mkd' instruction failed: "+msg.strip().replace('\n',' '),2)
-						self.client.send(base64.b64encode('fail'))
+						self.client.send(base64.b64encode('fail')+"\n")
 					
 				elif cmd == 'upl':
 					try:
@@ -97,13 +97,13 @@ class q_accept_th(threading.Thread):
 						q_accept_th.queue.put_nowait(msg.split("|")[0:3])
 						
 						#Send confirm
-						self.client.send(base64.b64encode('ok'))
+						self.client.send(base64.b64encode('ok')+"\n")
 						
 					except:
 						q_accept_th.log_error("'upl' instruction failed: "+msg.strip().replace('\n',' '),2)
-						self.client.send(base64.b64encode('fail'))
-				
-				if cmd == 'del':
+						self.client.send(base64.b64encode('fail')+"\n")
+					
+				elif cmd == 'del':
 					try:
 						
 						#Increment stat counters
@@ -118,11 +118,11 @@ class q_accept_th(threading.Thread):
 						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
 						
 						#Send confirm
-						self.client.send(base64.b64encode('ok'))
+						self.client.send(base64.b64encode('ok')+"\n")
 						
 					except:
 						q_accept_th.log_error("'del' instruction failed: "+msg.strip().replace('\n',' '),2)
-						self.client.send(base64.b64encode('fail'))
+						self.client.send(base64.b64encode('fail')+"\n")
 						
 				elif cmd == 'get':
 					
@@ -149,23 +149,27 @@ class q_accept_th(threading.Thread):
 								q_accept_th.get_count += 1
 							finally:
 								q_accept_th.stat_lock.release()
-							
-							
+								
+								
 							#Only do timeouts if it's the first iteration
 							#  We don't want to waste time when we already have
 							#  something in our list to work with
 							if i == 0:
-								item = q_accept_th.queue.get(True, 20)
+								item = q_accept_th.queue.get(True, 10)
 							else:
 								item = q_accept_th.queue.get_nowait()
-								
-							item_list.append('|'.join(item))
 							
+							if item != "": item_list.append('|'.join(item))
+							
+						except Queue.Empty: pass
 						except:
 							q_accept_th.log_error("'get' instruction failed: "+msg.strip().replace('\n',' '),2)
 					
 					#Send back the joined list
-					self.client.send(base64.b64encode(";".join(item_list)))
+					if len(item_list) > 0:
+						self.client.send(base64.b64encode(";".join(item_list))+"\n")
+					else:
+						self.client.send(base64.b64encode("")+"\n")
 					
 				elif cmd == 'inf':
 					ret = ''
@@ -198,13 +202,13 @@ class q_accept_th(threading.Thread):
 					finally:
 						q_accept_th.stat_lock.release()
 					
-					self.client.send(base64.b64encode(ret))
+					self.client.send(base64.b64encode(ret)+"\n")
 					
 				elif msg == '': #Client's done transmitting
 					break
 				else: #Nice try
 					q_accept_th.log_error('Invalid instruction received: '+msg.strip().replace('\n',' '),1)
-					self.client.send(base64.b64encode('invalid'))
+					self.client.send(base64.b64encode('invalid')+"\n")
 		except:
 			q_accept_th.log_error("Error while processing client instruction",3)
 		finally: #When client confirms End Of Transmission, or just disconnects
