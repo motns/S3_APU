@@ -29,83 +29,92 @@ class worker_th(threading.Thread):
 	upl_count = 0
 	time_started = time.time()
 
+	#Used for Amazon S3 Backoff mode
+	backoff_lock = threading.Lock()
+	backoff_set_status = False
+	backoff_set_time = time.time()
+	
 
 	def __init__(self,id):
 		threading.Thread.__init__(self)
 		self.threadnum = id # thread ID
 		
 	def run(self):
-		worker_th.debug_step('Thread ID '+str(self.threadnum)+" running")
 		
-		#Let's hook up with Big Daddy
 		try:
-			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			worker_th.debug_step('Thread ID '+str(self.threadnum)+" running")
 			
-			#Attempt to connect to Queue server up to 3 times (30 second intervals)
-			for i in range(3):
+			#Let's hook up with Big Daddy
+			try:
+				sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 				
-				try:
-					sock.connect((s3_config.queue_server_ip, s3_config.queue_server_port))
-					break
-				except:
-					worker_th.log_error("Error while connecting to Queue server",2)
-					if i == 2:
-						raise Exception("Failed to establish connection")
-					else:
-						time.sleep(30)
-			
-			worker_th.debug_step('Thread ID '+str(self.threadnum)+" connected to Queue server")	
-			
-		except:
-			worker_th.log_error("Error while setting up Socket connection to Queue server",3)
-			self.cleanup()
-			return #We're done here :(
-		
-		
-		#Time to pick up some work
-		work_list = []
-		try:
-			
-			for i in range(6):
-				
-				sock.send(base64.b64encode("get|"+str(worker_th.max_files))+"\n")
-				ret = base64.b64decode(sock.recv(2048)).strip()
-				
-				#If there's no work to be done at the moment
-				if ret == "":
-					if i == 5:
-						#It's enough for now. Stop this thread and start a new one
-						self.cleanup()
-						return
-					else: #Retry in a bit
-						time.sleep(10)
+				#Attempt to connect to Queue server up to 3 times (30 second intervals)
+				for i in range(3):
 					
-				else:
-					if ret != "":
-						if ";" in ret:
-							work_list = ret.split(";")
+					try:
+						sock.connect((s3_config.queue_server_ip, s3_config.queue_server_port))
+						break
+					except:
+						worker_th.log_error("Error while connecting to Queue server",2)
+						if i == 2:
+							raise Exception("Failed to establish connection") #Re-raise exception, to trigger cleanup
 						else:
-							work_list.append(ret)
-					break
+							time.sleep(30)
+				
+				worker_th.debug_step('Thread ID '+str(self.threadnum)+" connected to Queue server")	
+				
+			except Exception:
+				raise Exception("Failed to establish connection") #Re-raise exception, to trigger cleanup
+			except:
+				worker_th.log_error("Error while setting up Socket connection to Queue server",3)
+				raise Exception("Error while setting up Socket connection to Queue server") #Re-raise exception
 			
-		except:
-			worker_th.log_error("Error while getting and parsing work from Q Server",3)
+			
+			#Time to pick up some work
+			work_list = []
+			try:
+				
+				for i in range(6):
+					
+					sock.send(base64.b64encode("get|"+str(worker_th.max_files))+"\n")
+					ret = base64.b64decode(sock.recv(2048)).strip()
+					
+					#If there's no work to be done at the moment
+					if ret == "":
+						if i == 5:
+							#It's enough for now. Stop this thread and start a new one
+							raise Exception("No work to be done")
+						else: #Retry in a bit
+							time.sleep(10)
+						
+					else:
+						if ret != "":
+							if ";" in ret:
+								work_list = ret.split(";")
+							else:
+								work_list.append(ret)
+						break
+				
+			except Exception:
+				raise Exception("No work to be done") #Re-raise exception, to trigger cleanup
+			except:
+				worker_th.log_error("Error while getting and parsing work from Q Server",3)
+				raise Exception("Error while getting and parsing work from Q Server") #Re-raise exception
+			finally:
+				sock.close()
+			
+			
+			############################
+			## UPLOADING HAPPENS HERE
+			for work in work_list:
+				worker_th.debug_step('Got work: '+work)
+				time.sleep(5)
+			
+		except: pass
+		finally:
+			#At the end, clean up after ourselves
 			self.cleanup()
 			return
-		finally:
-			sock.close()
-		
-		
-		############################
-		## UPLOADING HAPPENS HERE
-		for work in work_list:
-			worker_th.debug_step('Got work: '+work)
-			time.sleep(5)
-		
-		
-		#At the end, clean up after ourselves
-		self.cleanup()
-		return
 	
 
 	#Removes this thread from executing list,
@@ -229,12 +238,15 @@ class S3WorkerDaemon(s3_daemon.Daemon):
 					if len(worker_th.tlist) >= worker_th.maxthreads: #We're maxed out
 						worker_th.list_lock.release()
 						worker_th.th_event.wait() #Wait for a thread to finish
-						
+					else:
+						worker_th.list_lock.release()
+					
 				except:
 					worker_th.log_error('Error while testing available threads',3)
+					try:
+						worker_th.list_lock.release()
+					except: pass
 					raise Exception("List lock error")
-				finally:
-					worker_th.list_lock.release()
 					
 				worker_th.newthread()
 			except:

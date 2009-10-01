@@ -141,7 +141,7 @@ class q_accept_th(threading.Thread):
 					for i in range(loop):
 						
 						try:
-						
+							
 							#Increment stat counters
 							try:
 								q_accept_th.stat_lock.acquire()
@@ -352,11 +352,16 @@ class S3QueueDaemon(s3_daemon.Daemon):
 						q_accept_th.log_error('Reached max threads, waiting for one to finish',2)
 						q_accept_th.list_lock.release()
 						q_accept_th.th_event.wait() #Wait for a thread to finish
-						
+					else:
+						q_accept_th.list_lock.release()
+					
 				except:
 					q_accept_th.log_error('Error while testing available threads',3)
-				finally:
-					q_accept_th.list_lock.release()
+					try:
+						q_accept_th.list_lock.release()
+					except: pass
+					raise Exception("List lock error")
+					
 				
 				q_accept_th.newthread(client)
 				
