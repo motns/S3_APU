@@ -44,7 +44,7 @@ def get_auth_header(verb,path="",dict_headers={}):
 	for header in sorted_header_keys:
 		#Only add Amazon control headers
 		if header.lower()[0:5] == "x-amz":
-			string_to_sign += header.lower()+":"+headers[header].strip()+"\n"
+			string_to_sign += header.lower()+":"+str(headers[header]).strip()+"\n"
 		
 		
 		

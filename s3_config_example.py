@@ -23,3 +23,7 @@ max_workers = 3
 
 #Maximum number of files to attempt to upload in one go
 max_files = 3
+
+#Group and User IDs for file uploads
+upload_uid = 1
+upload_gid = 1
