@@ -8,6 +8,7 @@ queue_server_port = 19998
 #S3 Access details
 aws_access_key_id = ""
 aws_secret_key = ""
+s3_bucket = ""
 
 #Folder to store all log files
 log_folder = '/path/to/folder'
@@ -19,10 +20,16 @@ log_folder = '/path/to/folder'
 debug_level = 0
 
 #Maximum worker threads
-max_workers = 3
+max_workers = 1
 
 #Maximum number of files to attempt to upload in one go
-max_files = 3
+max_files = 5
+
+#Maximum number of retries during transactions
+max_retries = 3
+
+#How long we should apply the SlowDown lock for (in seconds)
+slowdown_time = 15.0
 
 #Group and User IDs for file uploads
 upload_uid = 1

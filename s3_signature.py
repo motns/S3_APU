@@ -51,6 +51,8 @@ def get_auth_header(verb,path="",dict_headers={}):
 	#Add path
 	#Bucket + Object (without Query string, except for Sub-resources)
 	string_to_sign += path
+
+	#print string_to_sign
 		
 	#Generate signature
 	digest_encoded = base64.b64encode(

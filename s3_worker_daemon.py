@@ -2,7 +2,10 @@
 
 import s3_daemon
 import s3_config
-import socket, sys, threading, base64, time
+import s3_signature
+import pycurl
+import cStringIO
+import socket, sys, os, threading, base64, time, hashlib
 
 
 #########################################################################
@@ -14,33 +17,48 @@ class worker_th(threading.Thread):
 	tlist = [] # list of all current accept threads
 	maxthreads = s3_config.max_workers # max number of threads we're allowing
 	max_files = s3_config.max_files # max number of files we'll request in one go
-	
+
 	th_event = threading.Event() # event to signal OK to create more threads
 	list_lock = threading.Lock() # lock to guard tlist
-	
+
 	#Locks for shared logging
 	event_log_lock = threading.Lock()
 	error_log_lock = threading.Lock()
 	debug_log_lock = threading.Lock()
-	
+
 	#Counter variables for total commands executed, and breakdowns
 	stat_lock = threading.Lock()
 	total_count = 0
 	upl_count = 0
+	mkd_count = 0
+	del_count = 0
 	time_started = time.time()
+
+	#Performance stats (still covered by stat_lock)
+	#  Measured in seconds and microseconds
+	slow_trans = 0.0 #The slowest transaction ever
+	fast_trans = 0.0 #The fastest transaction ever
+	avg_trans = 0.0 #Moving average of transaction times
+
+	#File stats
+	#  The size in KB
+	sml_file_size = 0.0
+	lrg_file_size = 0.0
+	avg_file_size = 0.0
+
 
 	#Used for Amazon S3 Backoff mode
 	backoff_lock = threading.Lock()
 	backoff_set_status = False
 	backoff_set_time = time.time()
-	
+
 
 	def __init__(self,id):
 		threading.Thread.__init__(self)
 		self.threadnum = id # thread ID
-		
+
 	def run(self):
-		
+
 		try:
 			worker_th.debug_step('Thread ID '+str(self.threadnum)+" running")
 			
@@ -61,7 +79,7 @@ class worker_th(threading.Thread):
 						else:
 							time.sleep(30)
 				
-				worker_th.debug_step('Thread ID '+str(self.threadnum)+" connected to Queue server")	
+				worker_th.debug_step('Thread ID '+str(self.threadnum)+" connected to Queue server")
 				
 			except Exception:
 				raise Exception("Failed to establish connection") #Re-raise exception, to trigger cleanup
@@ -86,7 +104,7 @@ class worker_th(threading.Thread):
 							raise Exception("No work to be done")
 						else: #Retry in a bit
 							time.sleep(10)
-						
+							
 					else:
 						if ret != "":
 							if ";" in ret:
@@ -104,18 +122,65 @@ class worker_th(threading.Thread):
 				sock.close()
 			
 			
-			############################
-			## UPLOADING HAPPENS HERE
-			for work in work_list:
-				worker_th.debug_step('Got work: '+work)
-				time.sleep(5)
+			###################################################################
+			###################################################################
+			## S3 TRANSACTIONS HAPPEN HERE
 			
-		except: pass
+			curl_list = [] #List of single cURL handles, to be stacked onto multi-curl
+			return_list = [] #List of cStringIO handles, for response data
+			for work in work_list:
+				
+				try:
+					
+					######################
+					#Parse Instruction
+					
+					if "|" not in work: #Validate generic format
+						worker_th.log_error("Malformed instruction received",2)
+						continue
+					else:
+						cmd = work[0:3]
+						if cmd not in ("mkd","upl","del"): #Validate instruction
+							worker_th.log_error("Invalid instruction received",2)
+							continue
+						else:
+							params = work.split("|")
+
+							#Validate parameter lengths
+							if (cmd in ("mkd","del") and len(params) != 2) or (cmd in ("upl") and len(params) != 3):
+								worker_th.log_error("Invalid argument length",2)
+								continue
+							else:
+								#Ok, we have a valid instruction
+								# Let's parse it into work
+								instruction = params[0]
+								if instruction == "mkd" or instruction == "del":
+									source_path = ""
+									destination_key = params[1]
+								elif instruction == "upl":
+									source_path = params[1]
+									destination_key = params[2]
+								else:
+									worker_th.log_error("Error while parsing instruction",2)
+									continue
+
+					#At this point we should have some valid work to do
+
+
+
+					worker_th.debug_step('Got work: '+work)
+					time.sleep(5)
+
+				except: pass
+				finally: pass
+
+
+		except: pass #Lets catch all exceptions for now (@TODO: Unexpected Error logging here)
 		finally:
 			#At the end, clean up after ourselves
 			self.cleanup()
 			return
-	
+
 
 	#Removes this thread from executing list,
 	# and (optionally) signals for a new thread to be created
@@ -124,12 +189,12 @@ class worker_th(threading.Thread):
 			#Take ourselves off the thread list
 			worker_th.list_lock.acquire()
 			worker_th.tlist.remove(self)
-			
+
 			#Do we need to call for a new thread?
 			if len(worker_th.tlist) == worker_th.maxthreads - 1:
 				worker_th.th_event.set()
 				worker_th.th_event.clear()
-				
+
 		except:
 			worker_th.log_error("Error while finishing up thread execution (Perhaps problems with Event firing?)",3)
 		finally:
@@ -140,27 +205,27 @@ class worker_th(threading.Thread):
 	@staticmethod
 	def newthread():
 		worker_th.debug_check('Creating new thread')
-		
+
 		worker_th.list_lock.acquire()
 		t = worker_th(len(worker_th.tlist))
 		worker_th.tlist.append(t)
 		worker_th.list_lock.release()
 		t.start()
-	
-	
+
+
 	#############################################################
 	## Logging
-	
+
 	#Log debug messages (if debugging is on)
 	@staticmethod
 	def log_debug(msg,level=1):
 		if s3_config.debug_level < level: return
-		
+
 		if level == 1:
 			type = 'CHECKPOINT'
 		else:
 			type = 'STEP'
-		
+
 		worker_th.debug_log_lock.acquire()
 		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+msg+"\n"
 		try:
@@ -171,17 +236,17 @@ class worker_th(threading.Thread):
 				f.close()
 		except: pass
 		worker_th.debug_log_lock.release()
-	
+
 	#Debug log aliases
 	@staticmethod
 	def debug_check(msg):
 		worker_th.log_debug(msg,1)
-	
+
 	@staticmethod
 	def debug_step(msg):
 		worker_th.log_debug(msg,2)
-	
-	
+
+
 	#Log generic event to log
 	@staticmethod
 	def log_event(msg):
@@ -204,14 +269,14 @@ class worker_th(threading.Thread):
 	@staticmethod
 	def log_error(msg,level=1):
 		worker_th.error_log_lock.acquire()
-		
+
 		if level == 1:
 			type = 'NOTICE'
 		elif level == 2:
 			type = 'WARNING'
 		else:
 			type = 'ERROR'
-		
+
 		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+msg+"\n"
 		try:
 			f = file(s3_config.log_folder+'/s3_worker_error.log','a+')
@@ -221,17 +286,17 @@ class worker_th(threading.Thread):
 				f.close()
 		except: pass
 		worker_th.error_log_lock.release()
-		
-		
+
+
 
 #The daemon itself
 class S3WorkerDaemon(s3_daemon.Daemon):
 	def run(self):
-		
+
 		worker_th.debug_check('Server up and listening')
-		
+
 		while True:
-			
+
 			try:
 				try:
 					worker_th.list_lock.acquire()
@@ -240,14 +305,14 @@ class S3WorkerDaemon(s3_daemon.Daemon):
 						worker_th.th_event.wait() #Wait for a thread to finish
 					else:
 						worker_th.list_lock.release()
-					
+
 				except:
 					worker_th.log_error('Error while testing available threads',3)
 					try:
 						worker_th.list_lock.release()
 					except: pass
 					raise Exception("List lock error")
-					
+
 				worker_th.newthread()
 			except:
 				worker_th.log_error('Error while setting up new thread',3)
