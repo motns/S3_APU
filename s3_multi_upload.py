@@ -30,6 +30,7 @@ class worker_th:
 	sml_file_size = 0.0
 	lrg_file_size = 0.0
 	avg_file_size = 0.0
+	total_file_size = 0.0 #Cumulative total of all files uploaded
 
 
 	#Used for Amazon S3 Backoff mode
@@ -50,7 +51,7 @@ class worker_th:
 	@staticmethod
 	def output_stats():
 		
-		ret += ""
+		ret = ""
 		
 		#Get stat counter values
 		try:
@@ -67,6 +68,7 @@ class worker_th:
 			ret += "|sml_file_size:%F" % worker_th.sml_file_size
 			ret += "|lrg_file_size:%F" % worker_th.lrg_file_size
 			ret += "|avg_file_size:%F" % worker_th.avg_file_size
+			ret += "|total_file_size:%F" % worker_th.total_file_size
 			ret += "|backoff_status:%s" % worker_th.backoff_set_status
 			
 		finally:
@@ -84,15 +86,26 @@ class worker_th:
 #	"del|dummy.txt"
 #]
 
+#work_list = [
+#	"mkd|test_images",
+#	"mkd|test_images/images1",
+#	"mkd|test_images/images2",
+#	"upl|/Users/adamb/Pictures/P1030596.JPG|test_images/images1/P1030596.JPG",
+#	"upl|/Users/adamb/Pictures/P1040818.JPG|test_images/images1/P1040818.JPG",
+#	"upl|/Users/adamb/Pictures/ovi_csoport.jpg|test_images/images2/ovi_csoport.jpg",
+#	"upl|/Users/adamb/Pictures/profile_cool.jpg|test_images/images2/profile_cool.jpg",
+#	"upl|/Users/adamb/Pictures/profile_prof.jpg|test_images/images2/profile_prof.jpg"
+#]
+
 work_list = [
-	"mkd|test_images",
-	"mkd|test_images/images1",
-	"mkd|test_images/images2",
-	"upl|/Users/adamb/Pictures/P1030596.JPG|test_images/images1/P1030596.JPG",
-	"upl|/Users/adamb/Pictures/P1040818.JPG|test_images/images1/P1040818.JPG",
-	"upl|/Users/adamb/Pictures/ovi_csoport.jpg|test_images/images2/ovi_csoport.jpg",
-	"upl|/Users/adamb/Pictures/profile_cool.jpg|test_images/images2/profile_cool.jpg",
-	"upl|/Users/adamb/Pictures/profile_prof.jpg|test_images/images2/profile_prof.jpg"
+	"mkd|test_images2",
+	"mkd|test_images2/images1",
+	"mkd|test_images2/images2",
+	"upl|/Users/adamb/Documents/guitar_wallpaper/08-Prestige_L.jpg|test_images2/images1/P1030596.JPG",
+	"upl|/Users/adamb/Documents/guitar_wallpaper/RG-Creations_L.jpg|test_images2/images1/P1040818.JPG",
+	"upl|/Users/adamb/Documents/guitar_wallpaper/RGR320EX_L.jpg|test_images2/images2/ovi_csoport.jpg",
+	"upl|/Users/adamb/Documents/guitar_wallpaper/RGT320F_L.jpg|test_images2/images2/profile_cool.jpg",
+	"upl|/Users/adamb/Documents/guitar_wallpaper/RG_Prestige_L.jpg|test_images2/images2/profile_prof.jpg"
 ]
 
 #work_list.append("upl|/Users/adamb/Pictures/P1040139.JPG|test_images/images1/P1040139.JPG")
@@ -111,7 +124,7 @@ multi_curl.handles = [] #References to original easy curl handles
 #List of cStringIO objects, with responses
 response_list = []
 
-for i in range(len(work_list[0:3])):
+for i in range(len(work_list)):
 
 	work = work_list[i]
 	print work
@@ -282,6 +295,32 @@ for i in range(len(work_list[0:3])):
 	#Push onto stack
 	multi_curl.add_handle(c)
 	multi_curl.handles.append(c)
+	
+	#Update file stats
+	try:
+		#worker_th.stat_lock.acquire()
+		
+		worker_th.total_count += 1
+		
+		if instruction == "mkd":
+			worker_th.mkd_count += 1
+		elif instruction == "upl":
+			worker_th.upl_count += 1
+			
+			#Convert to KB for logging
+			log_file_size = filesize / 1024
+			
+			worker_th.sml_file_size = min(log_file_size,worker_th.sml_file_size) if worker_th.sml_file_size > 0.00 else log_file_size
+			worker_th.lrg_file_size = max(log_file_size,worker_th.lrg_file_size)
+			worker_th.avg_file_size = ((worker_th.avg_file_size + log_file_size) / 2) if worker_th.avg_file_size > 0.00 else log_file_size
+			worker_th.total_file_size += log_file_size
+			
+		elif instruction == "del":
+			worker_th.del_count += 1
+		
+	finally:
+		#worker_th.stat_lock.release()
+		pass
 
 
 #Check if we have to wait because of a SlowDown in effect
@@ -294,7 +333,6 @@ try:
 		if (time.time() - worker_th.backoff_set_time) >= s3_config.slowdown_time:
 			worker_th.backoff_set_status = False #Disable SlowDown mode
 		else:
-			print "Backoff mode"
 			time.sleep(3) #Chill out for a second
 	
 finally:
@@ -308,26 +346,22 @@ while True:
 	
 	#Perform requests
 	num_handles = len(multi_curl.handles)
-	if num_handles > 0:
-		while num_handles:
-			while 1:
-				ret, num_handles = multi_curl.perform()
-				if ret != pycurl.E_CALL_MULTI_PERFORM: #Check if we have to run perform again immediately
-					break
+	while num_handles:
+		while 1:
+			ret, num_handles = multi_curl.perform()
+			if ret != pycurl.E_CALL_MULTI_PERFORM: #Check if we have to run perform again immediately
+				break
 	
 
 	#Check the results
+	for_retry = []
 	for handle in multi_curl.handles:
 		
-		#Wait for response code
-		while 1:
-			try:
-				print "Getting response code"
-				ret_code = handle.getinfo(pycurl.RESPONSE_CODE)
-				print "Code: %d" % ret_code
-				break
-			except:
-				print "Exception"
+		#Whether to remove this item from the stack
+		to_remove = False
+		
+		#Get response code
+		ret_code = int(handle.getinfo(pycurl.RESPONSE_CODE))
 		
 		if ret_code in [200,204]: #Success (204 for Deletes, 200 for rest)
 			if ret_code == 200:
@@ -335,26 +369,20 @@ while True:
 			elif ret_code == 204:
 				worker_th.log_event("Successfully deleted object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL))
 			
-			multi_curl.remove_handle(handle)
-			multi_curl.handles.remove(handle)
-			handle.close()
+			to_remove = True
 			
 		elif ret_code in [400,403,405,411,412,501]: #We must have messed up the Request (Not Recoverable)
 			#@TODO: Maybe try to repair/re-build request based on response received
 			worker_th.log_error("Transaction failed with code %d for object: %s" % (ret_code, handle.getinfo(pycurl.EFFECTIVE_URL)),3)
 			
-			multi_curl.remove_handle(handle)
-			multi_curl.handles.remove(handle)
-			handle.close()
+			to_remove = True
 			
 		elif ret_code == 500:
 			worker_th.log_error("Transaction failed with code 500. Try again.",2)
 			
 			if retries >= 3:
 				worker_th.log_error("cURL transaction failed. Giving up...",3)
-				multi_curl.remove_handle(handle)
-				multi_curl.handles.remove(handle)
-				handle.close()
+				to_remove = True
 			else:
 				worker_th.log_error("cURL transaction failed. Try again.",2)
 				retries += 1
@@ -374,24 +402,41 @@ while True:
 				pass
 			
 		else: #Empty response (DNS/Connect timeout perhaps?)
-			print "Empty respose!"
 			if retries >= 3:
 				worker_th.log_error("cURL transaction failed. Giving up...",3)
-				multi_curl.remove_handle(handle)
-				multi_curl.handles.remove(handle)
-				handle.close()
+				to_remove = True
 			else:
 				worker_th.log_error("cURL transaction failed. Trying again.",2)
 				retries += 1
+		
+		#Should we remove this transaction?
+		if to_remove == True:
+			multi_curl.remove_handle(handle)
+			handle.close()
+		else:
+			for_retry.append(handle)
+	
+	#Let's put back work we have left (if any)
+	multi_curl.handles = for_retry
 
 	
 	#If there are no unfinished cURL responses left
 	if len(multi_curl.handles) == 0:
 		break
 	else: #Let things cool down a bit
-		print "In Retry loop"
-		#time.sleep(3)
+		time.sleep(3)
 	
+#Update transaction stats
+try:
+	#worker_th.stat_lock.acquire()
+	transaction_time = time.time() - start_time
+	
+	worker_th.slow_trans = max(worker_th.slow_trans,transaction_time)
+	worker_th.fast_trans = min(worker_th.fast_trans,transaction_time) if worker_th.fast_trans > 0.00 else transaction_time
+	worker_th.avg_trans = ((worker_th.avg_trans + transaction_time) / 2) if worker_th.avg_trans > 0.00 else transaction_time
+	
+finally:
+	#worker_th.stat_lock.release()
+	pass
 
-transaction_time = time.time() - start_time
-print "Transaction took: %F" % transaction_time
+worker_th.output_stats()
