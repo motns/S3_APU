@@ -274,7 +274,7 @@ class worker_th(threading.Thread):
 					c.setopt(pycurl.VERBOSE, 0)
 					c.setopt(pycurl.FOLLOWLOCATION, 1) #Follow 307's returned by S3
 					c.setopt(pycurl.MAXREDIRS, 3) #Let's not go crazy!
-					c.setopt(pycurl.TIMEOUT, 30) #Let's set some timeout, to avoid hanging
+					#c.setopt(pycurl.TIMEOUT, 30) #Let's set some timeout, to avoid hanging
 					
 					#Store original instruction in handle
 					c.instruction = work
@@ -362,6 +362,8 @@ class worker_th(threading.Thread):
 				###############################################################################
 				## Run transactions
 				
+				worker_th.debug_step("Running transactions")
+				
 				start_time = time.time()
 				
 				#Perform requests
@@ -437,7 +439,7 @@ class worker_th(threading.Thread):
 						multi_curl.remove_handle(handle)
 						handle.close()
 					except: pass
-			
+				
 				
 				#Update transaction stats
 				try:
@@ -452,6 +454,14 @@ class worker_th(threading.Thread):
 					worker_th.stat_lock.release()
 				
 				
+				#Close current cURL Multi stack (we'll create a new one later)
+				# This is to prevent timeouts
+				try:
+					multi_curl.close()
+					del(multi_curl)
+				except: pass
+				
+				
 				#If there are no unfinished cURL responses left
 				if len(work_for_retry) == 0: #Halleluja, we're done!
 					break
@@ -459,13 +469,6 @@ class worker_th(threading.Thread):
 					worker_th.log_error("MultiCurl transactions failed 3 times. Giving up...",3)
 					break
 				else:
-					
-					#Close current cURL Multi stack (we'll create a new one later)
-					# This is to prevent timeouts
-					try:
-						multi_curl.close()
-						del(multi_curl)
-					except: pass
 					
 					transaction_attempts += 1
 					
