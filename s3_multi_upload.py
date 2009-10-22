@@ -116,235 +116,241 @@ work_list.sort(lambda x,y: cmp(x.split('|')[-1], y.split('|')[-1]))
 
 ######################################################################
 
-#Initiate Multi Object
-multi_curl = pycurl.CurlMulti()
-multi_curl.setopt(pycurl.M_PIPELINING, 1) #Let's pipe calls, rather than running them in parallel
-multi_curl.handles = [] #References to original easy curl handles
+#Run until all the work is done
+# or we just had enough
+transaction_attempts = 1
+while 1:
 
-#List of cStringIO objects, with responses
-response_list = []
-
-for i in range(len(work_list)):
-
-	work = work_list[i]
-	print work
-
-	#####################################################
-	#Parse Instruction
-
-	if "|" not in work: #Validate generic format
-		worker_th.log_error("Malformed instruction received",2)
-		continue
-	else:
-		cmd = work[0:3]
-		if cmd not in ("mkd","upl","del"): #Validate instruction
-			worker_th.log_error("Invalid instruction received",2)
+	#Initiate Multi Object
+	multi_curl = pycurl.CurlMulti()
+	multi_curl.setopt(pycurl.M_PIPELINING, 1) #Let's pipe calls, rather than running them in parallel
+	multi_curl.handles = [] #References to original easy curl handles
+	
+	#Parse work and create cURL easy handles
+	for i in range(len(work_list)):
+		
+		work = work_list[i]
+		print work
+		
+		#####################################################
+		#Parse Instruction
+		
+		if "|" not in work: #Validate generic format
+			worker_th.log_error("Malformed instruction received",2)
 			continue
 		else:
-			params = work.split("|")
-
-			#Validate parameter lengths
-			if (cmd in ("mkd","del") and len(params) != 2) or (cmd in ("upl") and len(params) != 3):
-				worker_th.log_error("Invalid argument length",2)
+			cmd = work[0:3]
+			if cmd not in ("mkd","upl","del"): #Validate instructions
+				worker_th.log_error("Invalid instruction received",2)
 				continue
 			else:
-				#Ok, we have a valid instruction
-				# Let's parse it into work
-				instruction = params[0]
-				if instruction == "mkd" or instruction == "del":
-					source_path = ""
-					destination_key = params[1]
-				elif instruction == "upl":
-					source_path = params[1]
-					destination_key = params[2]
-				else:
-					worker_th.log_error("Error while parsing instruction",2)
+				params = work.split("|")
+				
+				#Validate parameter lengths
+				if (cmd in ("mkd","del") and len(params) != 2) or (cmd in ("upl") and len(params) != 3):
+					worker_th.log_error("Invalid argument length",2)
 					continue
-
-
-	#####################################################
-	# Build Request headers, and create AWS signature
-
-	#Set content type, and check file
-	if instruction == "upl":
-
-		#Basic Content Type guessing, based on file extension
-		file_parts = source_path.split(".")
-		if len(file_parts) > 1:
-			file_ext = file_parts[-1].lower()
-		else: file_ext = ""
-
-		#Arbitrary list of extension I thought I might use in the future
-		if file_ext in ["jpeg","jpg","jpe"]:
-			content_type = "image/jpeg"
-		elif file_ext in ["gif"]:
-			content_type = "image/gif"
-		elif file_ext in ["png"]:
-			content_type = "image/x-png"
-		elif file_ext in ["tiff","tif"]:
-			content_type = "image/tiff"
-		elif file_ext in ["html","htm"]:
-			content_type = "text/html"
-		elif file_ext in ["css"]:
-			content_type = "text/css"
-		elif file_ext in ["js"]:
-			content_type = "text/javascript"
-		elif file_ext in ["pdf"]:
-			content_type = "application/pdf"
-		elif file_ext in ["rtf"]:
-			content_type = "application/rtf"
-
-		else:
-			content_type = "text/plain"
-
-		#Linux file system mode for FILE(-), with 775
-		meta_mode = int(0100775)
-
-		if os.path.exists(source_path) == False: raise Exception("The file specified doesn't exist")
-
-		#Get file checksum
-		checksum = base64.b64encode(
-			hashlib.md5(
-				open(source_path, 'rb').read()
-			).digest()
-		)
-
-	elif instruction == "mkd":
-		content_type = "application/x-directory"
-
-		#Linux file system mode for DIRECTORY(d), with 775
-		meta_mode = int(040775)
-
-		checksum = ""
-	else: #It's a 'del' instruction
-		pass
-
-	#Build Base URI
-	uri = "http://"+s3_config.s3_bucket+".s3.amazonaws.com/"+destination_key
-
-	#Create Headers
-	if instruction == "upl" or instruction == "mkd":
-		headers = {
-			'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
-			'User-Agent':'S3 PTS',
-			'Content-Type':content_type,
-			'x-amz-acl':'public-read',
-			'x-amz-meta-gid': str(s3_config.upload_gid),
-			'x-amz-meta-mode': str(meta_mode),
-			'x-amz-meta-mtime': str(int(time.time())),
-			'x-amz-meta-uid': str(s3_config.upload_uid)
-		}
+				else:
+					#Ok, we have a valid instruction
+					# Let's parse it into work
+					instruction = params[0]
+					if instruction == "mkd" or instruction == "del":
+						source_path = ""
+						destination_key = params[1]
+					elif instruction == "upl":
+						source_path = params[1]
+						destination_key = params[2]
+					else:
+						worker_th.log_error("Error while parsing instruction",2)
+						continue
 		
-		if checksum != "": headers['Content-MD5'] = checksum
 		
-		headers['Authorization'] = s3_signature.get_auth_header('PUT', '/'+s3_config.s3_bucket+'/'+destination_key, headers)
-
-	elif instruction == "del":
-		headers = {
-			'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
-			'User-Agent':'S3 PTS'
-		}
+		#####################################################
+		# Build Request headers, and create AWS signature
 		
-		headers['Authorization'] = s3_signature.get_auth_header('DELETE', '/'+s3_config.s3_bucket+'/'+destination_key, headers)
-
-
-	###########################################################
-	# Initiate cURL object, then put it on MultiCurl stack
-
-	c = pycurl.Curl()
-	c.setopt(pycurl.URL, uri)
-	c.setopt(pycurl.HTTPHEADER, [h+": "+str(headers[h]) for h in headers])
-	c.setopt(pycurl.VERBOSE, 0)
-	c.setopt(pycurl.FOLLOWLOCATION, 1) #Follow 307's returned by S3
-	c.setopt(pycurl.MAXREDIRS, 3) #Let's not go crazy!
-	#c.setopt(pycurl.HEADER, 1)
-	#c.setopt(pycurl.TIMEOUT, 5)
-
-
-	if instruction == "upl":
-
-		c.setopt(pycurl.UPLOAD, 1)
-
-		#Read file for upload
-		c.setopt(pycurl.READFUNCTION, open(source_path, 'rb').read)
-
-		# Set size of file to be uploaded.
-		filesize = os.path.getsize(source_path)
-		c.setopt(pycurl.INFILESIZE, filesize)
-
-	elif instruction == "mkd":
-
-		c.setopt(pycurl.UPLOAD, 1)
-
-		#Fake empty file object
-		fake_file = cStringIO.StringIO()
-
-		#Read file for upload
-		c.setopt(pycurl.READFUNCTION, fake_file.read)
-
-		# Set size of file to be uploaded.
-		c.setopt(pycurl.INFILESIZE, 0)
-
-	elif instruction == "del":
-		c.setopt(pycurl.CUSTOMREQUEST, "DELETE")
-
-	#Catch response
-	#response_list.append(cStringIO.StringIO())
-	#c.setopt(pycurl.WRITEFUNCTION, response_list[i].write)
-
-	#Push onto stack
-	multi_curl.add_handle(c)
-	multi_curl.handles.append(c)
+		#Set content type, and check file
+		if instruction == "upl":
+			
+			#Basic Content Type guessing, based on file extension
+			file_parts = source_path.split(".")
+			if len(file_parts) > 1:
+				file_ext = file_parts[-1].lower()
+			else: file_ext = ""
 	
-	#Update file stats
-	try:
-		#worker_th.stat_lock.acquire()
-		
-		worker_th.total_count += 1
-		
-		if instruction == "mkd":
-			worker_th.mkd_count += 1
-		elif instruction == "upl":
-			worker_th.upl_count += 1
+			#Arbitrary list of extension I thought I might use in the future
+			if file_ext in ["jpeg","jpg","jpe"]:
+				content_type = "image/jpeg"
+			elif file_ext in ["gif"]:
+				content_type = "image/gif"
+			elif file_ext in ["png"]:
+				content_type = "image/x-png"
+			elif file_ext in ["tiff","tif"]:
+				content_type = "image/tiff"
+			elif file_ext in ["html","htm"]:
+				content_type = "text/html"
+			elif file_ext in ["css"]:
+				content_type = "text/css"
+			elif file_ext in ["js"]:
+				content_type = "text/javascript"
+			elif file_ext in ["pdf"]:
+				content_type = "application/pdf"
+			elif file_ext in ["rtf"]:
+				content_type = "application/rtf"
+				
+			else:
+				content_type = "text/plain"
 			
-			#Convert to KB for logging
-			log_file_size = filesize / 1024
+			#Linux file system mode for FILE(-), with 775
+			meta_mode = int(0100775)
 			
-			worker_th.sml_file_size = min(log_file_size,worker_th.sml_file_size) if worker_th.sml_file_size > 0.00 else log_file_size
-			worker_th.lrg_file_size = max(log_file_size,worker_th.lrg_file_size)
-			worker_th.avg_file_size = ((worker_th.avg_file_size + log_file_size) / 2) if worker_th.avg_file_size > 0.00 else log_file_size
-			worker_th.total_file_size += log_file_size
+			if os.path.exists(source_path) == False: raise Exception("The file specified doesn't exist")
+				
+			#Get file checksum
+			checksum = base64.b64encode(
+				hashlib.md5(
+					open(source_path, 'rb').read()
+				).digest()
+			)
+			
+		elif instruction == "mkd":
+			content_type = "application/x-directory"
+			
+			#Linux file system mode for DIRECTORY(d), with 775
+			meta_mode = int(040775)
+			
+			checksum = ""
+		else: #It's a 'del' instruction
+			pass
+		
+		#Build Base URI
+		uri = "http://"+s3_config.s3_bucket+".s3.amazonaws.com/"+destination_key
+		
+		#Create Headers
+		if instruction == "upl" or instruction == "mkd":
+			headers = {
+				'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+				'User-Agent':'S3 PTS',
+				'Content-Type':content_type,
+				'x-amz-acl':'public-read',
+				'x-amz-meta-gid': str(s3_config.upload_gid),
+				'x-amz-meta-mode': str(meta_mode),
+				'x-amz-meta-mtime': str(int(time.time())),
+				'x-amz-meta-uid': str(s3_config.upload_uid)
+			}
+			
+			if checksum != "": headers['Content-MD5'] = checksum
+			
+			headers['Authorization'] = s3_signature.get_auth_header('PUT', '/'+s3_config.s3_bucket+'/'+destination_key, headers)
 			
 		elif instruction == "del":
-			worker_th.del_count += 1
+			headers = {
+				'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+				'User-Agent':'S3 PTS'
+			}
+			
+			headers['Authorization'] = s3_signature.get_auth_header('DELETE', '/'+s3_config.s3_bucket+'/'+destination_key, headers)
+	
+	
+		###########################################################
+		# Initiate cURL object, then put it on MultiCurl stack
+		
+		c = pycurl.Curl()
+		c.setopt(pycurl.URL, uri)
+		c.setopt(pycurl.HTTPHEADER, [h+": "+str(headers[h]) for h in headers])
+		c.setopt(pycurl.VERBOSE, 0)
+		c.setopt(pycurl.FOLLOWLOCATION, 1) #Follow 307's returned by S3
+		c.setopt(pycurl.MAXREDIRS, 3) #Let's not go crazy!
+		#c.setopt(pycurl.HEADER, 1)
+		c.setopt(pycurl.TIMEOUT, 30) #Let's set some timeout, to avoid hanging
+		
+		#Store original instruction in handle
+		c.instruction = work
+		
+		if instruction == "upl":
+			
+			c.setopt(pycurl.UPLOAD, 1)
+			
+			#Read file for upload
+			c.setopt(pycurl.READFUNCTION, open(source_path, 'rb').read)
+			
+			# Set size of file to be uploaded.
+			filesize = os.path.getsize(source_path)
+			c.setopt(pycurl.INFILESIZE, filesize)
+			
+		elif instruction == "mkd":
+			
+			c.setopt(pycurl.UPLOAD, 1)
+			
+			#Fake empty file object
+			fake_file = cStringIO.StringIO()
+			
+			#Read file for upload
+			c.setopt(pycurl.READFUNCTION, fake_file.read)
+			
+			# Set size of file to be uploaded.
+			c.setopt(pycurl.INFILESIZE, 0)
+			
+		elif instruction == "del":
+			c.setopt(pycurl.CUSTOMREQUEST, "DELETE")
+		
+		#Push onto stack
+		multi_curl.add_handle(c)
+		multi_curl.handles.append(c)
+		
+		#Update file stats
+		# only on first run
+		if transaction_attempts == 1:
+			try:
+				#worker_th.stat_lock.acquire()
+				
+				worker_th.total_count += 1
+				
+				if instruction == "mkd":
+					worker_th.mkd_count += 1
+				elif instruction == "upl":
+					worker_th.upl_count += 1
+					
+					#Convert to KB for logging
+					log_file_size = filesize / 1024
+					
+					worker_th.sml_file_size = min(log_file_size,worker_th.sml_file_size) if worker_th.sml_file_size > 0.00 else log_file_size
+					worker_th.lrg_file_size = max(log_file_size,worker_th.lrg_file_size)
+					worker_th.avg_file_size = ((worker_th.avg_file_size + log_file_size) / 2) if worker_th.avg_file_size > 0.00 else log_file_size
+					worker_th.total_file_size += log_file_size
+					
+				elif instruction == "del":
+					worker_th.del_count += 1
+				
+			finally:
+				#worker_th.stat_lock.release()
+				pass
+
+
+	#Check if we have to wait because of a SlowDown in effect
+	try:
+		#worker_th.backoff_lock.acquire()
+		
+		if worker_th.backoff_set_status == True:
+			
+			#Check if time elapsed was enough
+			if (time.time() - worker_th.backoff_set_time) >= s3_config.slowdown_time:
+				worker_th.backoff_set_status = False #Disable SlowDown mode
+			else:
+				time.sleep(5) #Chill out for a second
 		
 	finally:
-		#worker_th.stat_lock.release()
+		#worker_th.backoff_lock.release()
 		pass
 
-
-#Check if we have to wait because of a SlowDown in effect
-try:
-	#worker_th.backoff_lock.acquire()
 	
-	if worker_th.backoff_set_status == True:
-		
-		#Check if time elapsed was enough
-		if (time.time() - worker_th.backoff_set_time) >= s3_config.slowdown_time:
-			worker_th.backoff_set_status = False #Disable SlowDown mode
-		else:
-			time.sleep(3) #Chill out for a second
 	
-finally:
-	#worker_th.backoff_lock.release()
-	pass
-
-#Run transactions until they're all done, or there's a fatal error
-retries = 0
-start_time = time.time()
-while True:
+	###############################################################################
+	## Run transactions
+	
+	start_time = time.time()
 	
 	#Perform requests
+	print "========================================== Performing Requests"
 	num_handles = len(multi_curl.handles)
 	while num_handles:
 		while 1:
@@ -352,9 +358,9 @@ while True:
 			if ret != pycurl.E_CALL_MULTI_PERFORM: #Check if we have to run perform again immediately
 				break
 	
-
+	
 	#Check the results
-	for_retry = []
+	work_for_retry = [] #List of instructions to try again
 	for handle in multi_curl.handles:
 		
 		#Whether to remove this item from the stack
@@ -380,12 +386,12 @@ while True:
 		elif ret_code == 500:
 			worker_th.log_error("Transaction failed with code 500. Try again.",2)
 			
-			if retries >= 3:
+			if transaction_attempts >= 3:
 				worker_th.log_error("cURL transaction failed. Giving up...",3)
 				to_remove = True
 			else:
 				worker_th.log_error("cURL transaction failed. Try again.",2)
-				retries += 1
+			
 			
 		elif ret_code == 503: #Wow,wow...Hold your horses! We probably hit a SlowDown
 			worker_th.log_error("Received 503 from server. Initiating SlowDown and retrying",2)
@@ -393,50 +399,72 @@ while True:
 			try:
 				#worker_th.backoff_lock.acquire()
 				
-				if backoff_set_status == False: #Don't reset Backoff Mode
-					backoff_set_status = True
-					backoff_set_time = time.time()
+				if worker_th.backoff_set_status == False: #Don't reset Backoff Mode
+					worker_th.backoff_set_status = True
+					worker_th.backoff_set_time = time.time()
 				
 			finally:
 				#worker_th.backoff_lock.release()
 				pass
 			
 		else: #Empty response (DNS/Connect timeout perhaps?)
-			if retries >= 3:
+			if transaction_attempts >= 3:
 				worker_th.log_error("cURL transaction failed. Giving up...",3)
 				to_remove = True
 			else:
 				worker_th.log_error("cURL transaction failed. Trying again.",2)
-				retries += 1
-		
+			
+			
 		#Should we remove this transaction?
-		if to_remove == True:
+		if to_remove == False:
+			work_for_retry.append(handle.instruction)
+		
+		#Remove from stack and terminate
+		try:
 			multi_curl.remove_handle(handle)
 			handle.close()
-		else:
-			for_retry.append(handle)
-	
-	#Let's put back work we have left (if any)
-	multi_curl.handles = for_retry
+		except: pass
 
 	
+	#Update transaction stats
+	try:
+		#worker_th.stat_lock.acquire()
+		transaction_time = time.time() - start_time
+		
+		worker_th.slow_trans = max(worker_th.slow_trans,transaction_time)
+		worker_th.fast_trans = min(worker_th.fast_trans,transaction_time) if worker_th.fast_trans > 0.00 else transaction_time
+		worker_th.avg_trans = ((worker_th.avg_trans + transaction_time) / 2) if worker_th.avg_trans > 0.00 else transaction_time
+		
+	finally:
+		#worker_th.stat_lock.release()
+		pass
+	
+	
 	#If there are no unfinished cURL responses left
-	if len(multi_curl.handles) == 0:
+	if len(work_for_retry) == 0: #Halleluja, we're done!
 		break
-	else: #Let things cool down a bit
-		time.sleep(3)
-	
-#Update transaction stats
-try:
-	#worker_th.stat_lock.acquire()
-	transaction_time = time.time() - start_time
-	
-	worker_th.slow_trans = max(worker_th.slow_trans,transaction_time)
-	worker_th.fast_trans = min(worker_th.fast_trans,transaction_time) if worker_th.fast_trans > 0.00 else transaction_time
-	worker_th.avg_trans = ((worker_th.avg_trans + transaction_time) / 2) if worker_th.avg_trans > 0.00 else transaction_time
-	
-finally:
-	#worker_th.stat_lock.release()
-	pass
+	elif transaction_attempts >= 3: #That's enough... :(
+		worker_th.log_error("MultiCurl transactions failed 3 times. Giving up...",3)
+		break
+	else:
+		
+		#Close current cURL Multi stack (we'll create a new one later)
+		# This is to prevent timeouts
+		try:
+			multi_curl.close()
+			del(multi_curl)
+		except: pass
+		
+		transaction_attempts += 1
+		
+		#Re-build work list with outstanding items
+		# Also re-sort, just in case
+		work_list = work_for_retry
+		work_list.sort(lambda x,y: cmp(x.split('|')[-1], y.split('|')[-1]))
+		
+		#Let things cool down a bit
+		print "Cool down"
+		time.sleep(5)
+
 
 worker_th.output_stats()

@@ -1,4 +1,5 @@
 *.kpf
 *.pyc
 *.log
+*performance
 s3_config.py
