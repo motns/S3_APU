@@ -134,7 +134,7 @@ class q_accept_th(threading.Thread):
 						loop = 1
 					
 					#Let's not go crazy!
-					if loop > 10: loop = 10
+					if loop > 30: loop = 30
 					
 					#Try to get the requested number of items
 					item_list = []
@@ -234,11 +234,13 @@ class q_accept_th(threading.Thread):
 	def newthread(client):
 		q_accept_th.debug_check('Creating new thread')
 		
-		q_accept_th.list_lock.acquire()
-		t = q_accept_th(client, len(q_accept_th.tlist))
-		q_accept_th.tlist.append(t)
-		q_accept_th.list_lock.release()
-		t.start()
+		try:
+			q_accept_th.list_lock.acquire()
+			t = q_accept_th(client, len(q_accept_th.tlist))
+			q_accept_th.tlist.append(t)
+			q_accept_th.list_lock.release()
+			t.start()
+		except: q_accept_th.log_error("Error while creating new thread",3)
 	
 	#############################################################
 	## Logging
@@ -254,7 +256,7 @@ class q_accept_th(threading.Thread):
 			type = 'STEP'
 		
 		q_accept_th.debug_log_lock.acquire()
-		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+msg+"\n"
+		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+str(msg)+"\n"
 		try:
 			f = file(s3_config.log_folder+'/s3_queue_debug.log','a+')
 			try:
@@ -278,7 +280,7 @@ class q_accept_th(threading.Thread):
 	@staticmethod
 	def log_event(msg):
 		q_accept_th.event_log_lock.acquire()
-		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"]: "+msg+"\n"
+		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"]: "+str(msg)+"\n"
 		try:
 			f = file(s3_config.log_folder+'/s3_queue_event.log','a+')
 			try:
@@ -303,7 +305,7 @@ class q_accept_th(threading.Thread):
 		else:
 			type = 'ERROR'
 		
-		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+msg+"\n"
+		log = "["+time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime())+"] - "+type+": "+str(msg)+"\n"
 		try:
 			f = file(s3_config.log_folder+'/s3_queue_error.log','a+')
 			try:

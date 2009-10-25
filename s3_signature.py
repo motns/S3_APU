@@ -32,8 +32,12 @@ def get_auth_header(verb,path="",dict_headers={}):
 		
 		
 	#Add date
-	string_to_sign += headers['Date']+"\n"
-	del headers['Date']
+	if 'Date' in headers:
+		string_to_sign += headers['Date']+"\n"
+		del headers['Date']
+		
+	else:
+		string_to_sign += "\n"
 		
 		
 	#Add the rest of the headers

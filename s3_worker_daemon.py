@@ -59,7 +59,7 @@ class worker_th(threading.Thread):
 		self.threadnum = id # thread ID
 
 	def run(self):
-
+		
 		try:
 			worker_th.debug_step('Thread ID '+str(self.threadnum)+" running")
 			
@@ -96,7 +96,7 @@ class worker_th(threading.Thread):
 				for i in range(6):
 					
 					sock.send(base64.b64encode("get|"+str(worker_th.max_files))+"\n")
-					ret = base64.b64decode(sock.recv(2048)).strip()
+					ret = base64.b64decode(sock.recv(8192)).strip()
 					
 					#If there's no work to be done at the moment
 					if ret == "":
@@ -105,7 +105,7 @@ class worker_th(threading.Thread):
 							raise Exception("No work to be done")
 						else: #Retry in a bit
 							time.sleep(10)
-							
+						
 					else:
 						if ret != "":
 							if ";" in ret:
@@ -191,7 +191,7 @@ class worker_th(threading.Thread):
 							file_ext = file_parts[-1].lower()
 						else: file_ext = ""
 						
-						#Arbitrary list of extension I thought I might use in the future
+						#Arbitrary list of extensions I thought I might use in the future
 						if file_ext in ["jpeg","jpg","jpe"]:
 							content_type = "image/jpeg"
 						elif file_ext in ["gif"]:
@@ -217,8 +217,17 @@ class worker_th(threading.Thread):
 						#Linux file system mode for FILE(-), with 775
 						meta_mode = int(0100775)
 						
-						if os.path.exists(source_path) == False: raise Exception("The file specified doesn't exist")
-							
+						#Check if file exists
+						# Retry 3 times if missing
+						for r in range(3):
+							if os.path.exists(source_path) == False:
+								if r >= 2:
+									raise Exception("The file specified doesn't exist")
+								else:
+									time.sleep(5)
+							else: break
+						
+						
 						#Get file checksum
 						checksum = base64.b64encode(
 							hashlib.md5(
@@ -242,7 +251,7 @@ class worker_th(threading.Thread):
 					#Create Headers
 					if instruction == "upl" or instruction == "mkd":
 						headers = {
-							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
 							'User-Agent':'S3 PTS',
 							'Content-Type':content_type,
 							'x-amz-acl':'public-read',
@@ -258,7 +267,7 @@ class worker_th(threading.Thread):
 						
 					elif instruction == "del":
 						headers = {
-							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
 							'User-Agent':'S3 PTS'
 						}
 						
@@ -274,9 +283,10 @@ class worker_th(threading.Thread):
 					c.setopt(pycurl.VERBOSE, 0)
 					c.setopt(pycurl.FOLLOWLOCATION, 1) #Follow 307's returned by S3
 					c.setopt(pycurl.MAXREDIRS, 3) #Let's not go crazy!
-					#c.setopt(pycurl.TIMEOUT, 30) #Let's set some timeout, to avoid hanging
+					#c.setopt(pycurl.TIMEOUT, 30) #Disabled timeout, to get around Python being crashed by Timeout SIGNAL
 					
 					#Store original instruction in handle
+					# in case it needs to be repeated
 					c.instruction = work
 					
 					if instruction == "upl":
