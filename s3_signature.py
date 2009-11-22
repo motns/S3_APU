@@ -9,11 +9,11 @@ def get_auth_header(verb,path="",dict_headers={}):
 	string_to_sign = "";
 	headers = dict_headers.copy()
 		
-	#Add Action (verb)
+	#Add Action (verb): GET, PUT, DELETE
 	string_to_sign += str(verb)+"\n"
 		
 	#Add Content MD5
-	#Only applies to PUT requests, but it's optional
+	#Only applies to PUT requests and it's optional
 	if 'Content-MD5' in headers:
 		string_to_sign += str(headers['Content-MD5'])+"\n"
 		del headers['Content-MD5']
@@ -31,7 +31,6 @@ def get_auth_header(verb,path="",dict_headers={}):
 		string_to_sign += "\n"
 		
 		
-	#Add date
 	if 'Date' in headers:
 		string_to_sign += headers['Date']+"\n"
 		del headers['Date']
@@ -41,7 +40,7 @@ def get_auth_header(verb,path="",dict_headers={}):
 		
 		
 	#Add the rest of the headers
-	# AWS Requires that the headers in the signature be converted
+	# AWS Requires that the headers in the signature to be converted
 	# to all lowercase, and be sorted alphabetically
 	sorted_header_keys = sorted(headers.keys())
 	
@@ -49,9 +48,9 @@ def get_auth_header(verb,path="",dict_headers={}):
 		#Only add Amazon control headers
 		if header.lower()[0:5] == "x-amz":
 			string_to_sign += header.lower()+":"+str(headers[header]).strip()+"\n"
-		
-		
-		
+	
+	
+	
 	#Add path
 	#Bucket + Object (without Query string, except for Sub-resources)
 	string_to_sign += path

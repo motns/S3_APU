@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 import s3_signature
 import pycurl
-import time
-import cStringIO
+import time, cStringIO
 from xml.dom import minidom
 
 def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 
-	if bucket.strip() == "": raise "You have to pass in  a bucket name"
+	if bucket.strip() == "": raise "You have to pass in a bucket name"
 
 	#Build Base URI
 	uri = "http://"+bucket+".s3.amazonaws.com"
@@ -39,59 +38,66 @@ def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 	headers['Authorization'] = s3_signature.get_auth_header('GET', '/'+bucket+'/', headers)
 	
 	
-	#Initiate curl object
-	c = pycurl.Curl()
-	c.setopt(pycurl.URL, uri)
-	c.setopt(pycurl.HTTPHEADER, [h+": "+str(headers[h]) for h in headers])
-	c.setopt(pycurl.VERBOSE, 0)
-	c.setopt(pycurl.HEADER, 1)
-	
-	#Catch response
-	res = cStringIO.StringIO()
-	c.setopt(pycurl.WRITEFUNCTION, res.write)
+	#Repeat transaction until successful, or we run out of retries
+	retries = 0
+	while 1:
 		
-	#Do It
-	c.perform()
+		#Initiate curl object
+		c = pycurl.Curl()
+		c.setopt(pycurl.URL, uri)
+		c.setopt(pycurl.HTTPHEADER, [h+": "+str(headers[h]) for h in headers])
+		c.setopt(pycurl.VERBOSE, 0)
+		c.setopt(pycurl.HEADER, 0)
 		
-	#@TODO: Some error handling/parsing here!
-	#print c.getinfo(pycurl.HTTP_CODE)
-	
-	c.close()
-	
-	response = res.getvalue().split("\r\n")
-	
-	#Get out headers and body
-	body = response[-1]
-	headers = [i for i in response[1:-2] if i != '']
-	
-	print headers
-	
-	print "=== Keys:"
-	dom = minidom.parseString(body)
+		#Catch response
+		res = cStringIO.StringIO()
+		c.setopt(pycurl.WRITEFUNCTION, res.write)
+			
+		#Do It
+		retry = 0
+		c.perform()
+		
+		ret_code = int(c.getinfo(pycurl.RESPONSE_CODE))
+		
+		if ret_code in [200]: #Success
+			pass
+		
+		elif ret_code in [400,403,405,411,412,501]: #We must have messed up the Request (Not Recoverable)
+			retry = 1
+		
+		elif ret_code == 500:
+			retry = 1
+		
+		elif ret_code == 503: #Wow,wow...Hold your horses! We probably hit a SlowDown
+			retry = 1
+		
+		else: #Empty response (DNS/Connect timeout perhaps?)
+			retry = 1
+		
+		c.close()
+		
+		if retry == 0:
+			break
+		
+		elif retry == 1 and retries <= s3_config.max_retries:
+			retries += 1
+			print "cURL transaction failed. Retrying...\n"
+		
+		else:
+			print "cURL transaction failed too many times. Giving up...\n"
+			return 0
+
+
+	return_keys = []
+	dom = minidom.parseString(res.getvalue())
 	for key in dom.getElementsByTagName('Key'):
-		print key.firstChild.nodeValue
+		return_keys.append(key.firstChild.nodeValue)
 	
-	print "\n=== Common Prefixes:"	
-	for prefixes in dom.getElementsByTagName('CommonPrefixes'):
-		print prefixes.getElementsByTagName('Prefix')[0].firstChild.nodeValue
+	return return_keys
 	
-		#foreach($response_xml->Contents As $object){
-		#  $return[] = array(
-		#		"Key"=>(string) $object->Key,
-		#		"LastModified"=>(string) $object->LastModified,
-		#		"ETag"=>(string) $object->ETag,
-		#		"Size"=>(string) $object->Size,
-		#		"Owner"=>array(
-		#			 "ID"=>(string) $object->Owner->ID,
-		#			 "DisplayName"=>(string) $object->Owner->DisplayName
-		#		)
-		#  );
-		#}
-		
-		
-		
-##############################################################################################
-##############################################################################################
+	
+################################################################################
+################################################################################
 
 def get_object(bucket,object_key=""):
 
