@@ -5,7 +5,7 @@ import s3_config
 import s3_signature
 import pycurl
 import cStringIO
-import socket, sys, os, threading, base64, time, hashlib
+import base64, hashlib, os, socket, sys, threading, time
 
 
 #########################################################################
@@ -14,9 +14,9 @@ import socket, sys, os, threading, base64, time, hashlib
 
 #Thread for accepting instructions
 class worker_th(threading.Thread):
-	tlist = [] # list of all current accept threads
+	tlist = [] # list of all current worker threads
 	maxthreads = s3_config.max_workers # max number of threads we're allowing
-	max_files = s3_config.max_files # max number of files we'll request in one go
+	max_files = s3_config.max_files # max number of items we'll request in one go
 
 	th_event = threading.Event() # event to signal OK to create more threads
 	list_lock = threading.Lock() # lock to guard tlist
@@ -35,31 +35,31 @@ class worker_th(threading.Thread):
 	time_started = time.time()
 
 	#Performance stats (still covered by stat_lock)
-	#  Measured in seconds and microseconds
+	# Measured in seconds and microseconds
+	# Please Note:
+	# The figures may also be affected by the maximum number of files
+	# included in each transaction
 	slow_trans = 0.0 #The slowest transaction ever
 	fast_trans = 0.0 #The fastest transaction ever
 	avg_trans = 0.0 #Moving average of transaction times
 
 	#File stats
-	#  The size in KB
+	# Size in KB
 	sml_file_size = 0.0
 	lrg_file_size = 0.0
 	avg_file_size = 0.0
 	total_file_size = 0.0 #Cumulative total of all files uploaded
-
 
 	#Used for Amazon S3 Backoff mode
 	backoff_lock = threading.Lock()
 	backoff_set_status = False
 	backoff_set_time = time.time()
 
-
 	def __init__(self,id):
 		threading.Thread.__init__(self)
 		self.threadnum = id # thread ID
 
 	def run(self):
-		
 		try:
 			worker_th.debug_step('Thread ID '+str(self.threadnum)+" running")
 			
@@ -69,7 +69,6 @@ class worker_th(threading.Thread):
 				
 				#Attempt to connect to Queue server up to 3 times (30 second intervals)
 				for i in range(3):
-					
 					try:
 						sock.connect((s3_config.queue_server_ip, s3_config.queue_server_port))
 						break
@@ -92,10 +91,9 @@ class worker_th(threading.Thread):
 			#Time to pick up some work
 			work_list = []
 			try:
-				
-				for i in range(6):
-					
+				for i in range(6):	
 					sock.send(base64.b64encode("get|"+str(worker_th.max_files))+"\n")
+					# Max receive calibrated for the 30 item limit on Get from Queue
 					ret = base64.b64decode(sock.recv(8192)).strip()
 					
 					#If there's no work to be done at the moment
@@ -131,12 +129,10 @@ class worker_th(threading.Thread):
 			# Sorted keys are less likely to cause a 503 SlowDown error
 			work_list.sort(lambda x,y: cmp(x.split('|')[-1], y.split('|')[-1]))
 			
-			#Run until all the work is done
-			# or we just had enough
+			#Run until all the work is done or we just had enough
 			transaction_attempts = 1
 			while 1:
 				
-				#Initiate Multi Object
 				multi_curl = pycurl.CurlMulti()
 				multi_curl.setopt(pycurl.M_PIPELINING, 1) #Let's pipe calls, rather than running them in parallel
 				multi_curl.handles = [] #References to original easy curl handles
@@ -218,7 +214,7 @@ class worker_th(threading.Thread):
 						meta_mode = int(0100775)
 						
 						#Check if file exists
-						# Retry 3 times if missing
+						# Retry 3 times if missing - To get around race conditions
 						for r in range(3):
 							if os.path.exists(source_path) == False:
 								if r >= 2:
@@ -226,7 +222,6 @@ class worker_th(threading.Thread):
 								else:
 									time.sleep(5)
 							else: break
-						
 						
 						#Get file checksum
 						checksum = base64.b64encode(
@@ -242,6 +237,7 @@ class worker_th(threading.Thread):
 						meta_mode = int(040775)
 						
 						checksum = ""
+						
 					else: #It's a 'del' instruction
 						pass
 					
@@ -290,7 +286,6 @@ class worker_th(threading.Thread):
 					c.instruction = work
 					
 					if instruction == "upl":
-						
 						c.setopt(pycurl.UPLOAD, 1)
 						
 						#Read file for upload
@@ -301,7 +296,6 @@ class worker_th(threading.Thread):
 						c.setopt(pycurl.INFILESIZE, filesize)
 						
 					elif instruction == "mkd":
-						
 						c.setopt(pycurl.UPLOAD, 1)
 						
 						#Fake empty file object
@@ -347,7 +341,6 @@ class worker_th(threading.Thread):
 						finally:
 							worker_th.stat_lock.release()
 				
-				
 				#Check if there's anything to do at all
 				if len(multi_curl.handles) == 0:
 					break
@@ -357,16 +350,13 @@ class worker_th(threading.Thread):
 					worker_th.backoff_lock.acquire()
 					
 					if worker_th.backoff_set_status == True:
-						
-						#Check if time elapsed was enough
 						if (time.time() - worker_th.backoff_set_time) >= s3_config.slowdown_time:
-							worker_th.backoff_set_status = False #Disable SlowDown mode
+							worker_th.backoff_set_status = False
 						else:
-							time.sleep(3) #Chill out for a bit
+							time.sleep(3)
 					
 				finally:
 					worker_th.backoff_lock.release()
-				
 				
 				
 				###############################################################################
@@ -383,7 +373,6 @@ class worker_th(threading.Thread):
 						ret, num_handles = multi_curl.perform()
 						if ret != pycurl.E_CALL_MULTI_PERFORM: #Check if we have to run perform again immediately
 							break
-				
 				
 				#Check the results
 				work_for_retry = [] #List of instructions to try again
@@ -418,7 +407,6 @@ class worker_th(threading.Thread):
 						else:
 							worker_th.log_error("cURL transaction failed. Try again.",2)
 						
-						
 					elif ret_code == 503: #Wow,wow...Hold your horses! We probably hit a SlowDown
 						worker_th.log_error("Received 503 from server. Initiating SlowDown and retrying",2)
 						
@@ -440,7 +428,7 @@ class worker_th(threading.Thread):
 							worker_th.log_error("cURL transaction failed. Trying again.",2)
 						
 						
-					#Should retry this transaction?
+					#Should we retry this transaction?
 					if to_remove == False:
 						work_for_retry.append(handle.instruction)
 					
@@ -479,7 +467,6 @@ class worker_th(threading.Thread):
 					worker_th.log_error("MultiCurl transactions failed 3 times. Giving up...",3)
 					break
 				else:
-					
 					transaction_attempts += 1
 					
 					#Re-build work list with outstanding items
@@ -501,7 +488,7 @@ class worker_th(threading.Thread):
 
 
 	#Removes this thread from executing list,
-	# and (optionally) signals for a new thread to be created
+	# and (if required) signals for a new thread to be created
 	def cleanup(self):
 		try:
 			#Take ourselves off the thread list
@@ -517,7 +504,6 @@ class worker_th(threading.Thread):
 			worker_th.log_error("Error while finishing up thread execution (Perhaps problems with Event firing?)",3)
 		finally:
 			worker_th.list_lock.release()
-
 
 
 	@staticmethod
@@ -646,11 +632,9 @@ class worker_th(threading.Thread):
 #The daemon itself
 class S3WorkerDaemon(s3_daemon.Daemon):
 	def run(self):
-
 		worker_th.debug_check('Server up and listening')
-
+		
 		while 1:
-
 			try:
 				try:
 					worker_th.list_lock.acquire()
@@ -676,8 +660,6 @@ class S3WorkerDaemon(s3_daemon.Daemon):
 #########################################################################
 # DAEMON STUFF
 
-
-#Check run command
 if __name__ == "__main__":
 	daemon = S3WorkerDaemon('/tmp/s3_worker_daemon.pid')
 	if len(sys.argv) == 2:

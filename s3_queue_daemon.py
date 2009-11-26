@@ -2,8 +2,7 @@
 
 import s3_daemon
 import s3_config
-import socket, sys, threading, Queue, base64, time
-
+import base64, time, socket, sys, threading, Queue
 
 #########################################################################
 #########################################################################
@@ -11,7 +10,8 @@ import socket, sys, threading, Queue, base64, time
 
 #Thread for accepting instructions
 class q_accept_th(threading.Thread):
-	tlist = [] # list of all current accept threads
+	
+	tlist = [] # list of all current active threads
 	maxthreads = 100 # max number of threads we're allowing
 	
 	th_event = threading.Event() # event to signal OK to create more threads
@@ -31,23 +31,20 @@ class q_accept_th(threading.Thread):
 	get_count = 0
 	time_started = time.time()
 
-	#The item list
 	queue = Queue.Queue()
-
 	
 	def __init__(self,client,id):
 		threading.Thread.__init__(self)
 		self.threadnum = id # thread ID
 		self.client = client
-		
+	
+	
 	def run(self):
 		q_accept_th.debug_step('Thread ID '+str(self.threadnum)+" running")
 		
 		try:
-			
-			#While there's instructions coming
+			#While we have instructions coming
 			while True:
-				
 				#Get and decode message
 				msg = base64.b64decode(self.client.recv(1024)).strip()
 				
@@ -59,11 +56,10 @@ class q_accept_th(threading.Thread):
 				# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
 				# del - delete file from S3 (del|/path/in/s3) 
 				# get - pop out and return the last item from the queue
-				# inf - get information on the current status of the Queue server
+				# inf - return information on the current status of the Queue server
 				cmd = msg[0:3]
 				if cmd == 'mkd':
 					try:
-						
 						#Increment stat counters
 						try:
 							q_accept_th.stat_lock.acquire()
@@ -84,7 +80,6 @@ class q_accept_th(threading.Thread):
 					
 				elif cmd == 'upl':
 					try:
-						
 						#Increment stat counters
 						try:
 							q_accept_th.stat_lock.acquire()
@@ -92,7 +87,7 @@ class q_accept_th(threading.Thread):
 							q_accept_th.upl_count += 1
 						finally:
 							q_accept_th.stat_lock.release()
-					
+						
 						#Put in the Queue 
 						q_accept_th.queue.put_nowait(msg.split("|")[0:3])
 						
@@ -105,7 +100,6 @@ class q_accept_th(threading.Thread):
 					
 				elif cmd == 'del':
 					try:
-						
 						#Increment stat counters
 						try:
 							q_accept_th.stat_lock.acquire()
@@ -139,9 +133,7 @@ class q_accept_th(threading.Thread):
 					#Try to get the requested number of items
 					item_list = []
 					for i in range(loop):
-						
 						try:
-							
 							#Increment stat counters
 							try:
 								q_accept_th.stat_lock.acquire()
@@ -149,7 +141,6 @@ class q_accept_th(threading.Thread):
 								q_accept_th.get_count += 1
 							finally:
 								q_accept_th.stat_lock.release()
-								
 								
 							#Only do timeouts if it's the first iteration
 							#  We don't want to waste time when we already have
@@ -209,6 +200,7 @@ class q_accept_th(threading.Thread):
 				else: #Nice try
 					q_accept_th.log_error('Invalid instruction received: '+msg.strip().replace('\n',' '),1)
 					self.client.send(base64.b64encode('invalid')+"\n")
+			
 		except:
 			q_accept_th.log_error("Error while processing client instruction",3)
 		finally: #When client confirms End Of Transmission, or just disconnects
@@ -319,8 +311,8 @@ class q_accept_th(threading.Thread):
 	
 #The daemon itself
 class S3QueueDaemon(s3_daemon.Daemon):
+	
 	def run(self):
-		
 		#Set up socket for accepting connections
 		for i in range(3):
 			try:
@@ -336,19 +328,14 @@ class S3QueueDaemon(s3_daemon.Daemon):
 					q_accept_th.log_error('Queue server failed to bind to IP '+str(s3_config.queue_server_ip)+' on Port '+str(s3_config.queue_server_port),2)
 					time.sleep(30)
 		
-		
 		q_accept_th.debug_check('Server up and listening')
 		
 		while True:
-			
 			try:
-				
 				#Accept new connection
 				(client,ap) = lstn.accept()
-				#q_accept_th.debug_step('Client connected')
 				
 				try:
-					
 					q_accept_th.list_lock.acquire()
 					if len(q_accept_th.tlist) >= q_accept_th.maxthreads: #We're maxed out
 						q_accept_th.log_error('Reached max threads, waiting for one to finish',2)
@@ -363,7 +350,6 @@ class S3QueueDaemon(s3_daemon.Daemon):
 						q_accept_th.list_lock.release()
 					except: pass
 					raise Exception("List lock error")
-					
 				
 				q_accept_th.newthread(client)
 				
@@ -374,8 +360,6 @@ class S3QueueDaemon(s3_daemon.Daemon):
 #########################################################################
 # DAEMON STUFF
 
-
-#Check run command
 if __name__ == "__main__":
 	daemon = S3QueueDaemon('/tmp/s3_queue_daemon.pid')
 	if len(sys.argv) == 2:
