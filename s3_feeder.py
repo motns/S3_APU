@@ -66,6 +66,7 @@ class Feeder:
 				
 				if os.path.isdir(item_with_path):
 					if os.path.join(self.key_root, relative_path, item) not in uploaded_keys:
+						print "Missing folder: %s" % (item_with_path)
 						work = "mkd|%s" % os.path.join(self.key_root, relative_path, item)
 						sock.send(base64.b64encode(work)+"\n")
 						v = base64.b64decode(sock.recv(1024))
@@ -74,6 +75,7 @@ class Feeder:
 					
 				elif os.path.isfile(item_with_path):
 					if os.path.join(self.key_root, relative_path, item) not in uploaded_keys:
+						print "Missing file: %s" % (item_with_path)
 						work = "upl|%s|%s" % (item_with_path, os.path.join(self.key_root, relative_path, item))
 						sock.send(base64.b64encode(work)+"\n")
 						v = base64.b64decode(sock.recv(1024))
