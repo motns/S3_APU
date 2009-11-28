@@ -252,7 +252,7 @@ class worker_th(threading.Thread):
 					if instruction == "upl" or instruction == "mkd":
 						headers = {
 							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
-							'User-Agent':'S3 PTS',
+							'User-Agent':'S3 APU',
 							'Content-Type':content_type,
 							'x-amz-acl':'public-read',
 							'x-amz-meta-gid': str(s3_config.upload_gid),
@@ -268,7 +268,7 @@ class worker_th(threading.Thread):
 					elif instruction == "del":
 						headers = {
 							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
-							'User-Agent':'S3 PTS'
+							'User-Agent':'S3 APU'
 						}
 						
 						headers['Authorization'] = s3_signature.get_auth_header('DELETE', '/'+s3_config.s3_bucket+'/'+destination_key, headers)

@@ -5,7 +5,6 @@ import s3_feeder
 #Get and validate feed path
 try:
 	feed_root = sys.argv[1]
-	print feed_root
 	if not os.path.exists(feed_root) or not os.path.isdir(feed_root):
 		raise Exception("Invalid path")
 except: raise Exception("You have to pass in a valid folder path as the first argument")
