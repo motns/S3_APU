@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import s3_config
 import s3_signature
 import pycurl
 import time, cStringIO
@@ -31,7 +32,7 @@ def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 	
 	#Create Headers
 	headers = {
-		'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+		'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
 		'User-Agent':'S3 Python API'
 	}
 	headers['Authorization'] = s3_signature.get_auth_header('GET', '/'+bucket+'/', headers)
@@ -68,6 +69,7 @@ def list_objects(bucket,prefix="",marker="",maxkeys=10,delimiter=""):
 		elif retry == 1 and retries <= s3_config.max_retries:
 			retries += 1
 			print "cURL transaction for S3 Listing failed. Retrying...\n"
+			time.sleep(3)
 		
 		else:
 			print "cURL transaction for S3 Listing failed too many times. Giving up...\n"
@@ -95,7 +97,7 @@ def get_object(bucket,object_key=""):
 	
 	#Create Headers
 	headers = {
-		'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.gmtime()),
+		'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
 		'User-Agent':'S3 Python API'
 	}
 	headers['Authorization'] = s3_signature.get_auth_header('GET','/'+bucket+'/'+object_key,headers)
