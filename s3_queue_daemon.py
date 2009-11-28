@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+#
+# chkconfig: 3 87 86
+# description: A high-speed multi-threaded queueing system, supporting the S3 APU application
+# processname: s3_queue_daemon
 
 import s3_daemon
 import s3_config

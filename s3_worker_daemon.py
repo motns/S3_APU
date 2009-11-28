@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+#
+# chkconfig: 3 89 88
+# description: Multi-threaded cURL-based uploader for S3
+# processname: s3_worker_daemon
 
 import s3_daemon
 import s3_config
@@ -85,7 +89,7 @@ class worker_th(threading.Thread):
 				raise Exception("Failed to establish connection") #Re-raise exception, to trigger cleanup
 			except:
 				worker_th.log_error("Error while setting up Socket connection to Queue server",3)
-				raise Exception("Error while setting up Socket connection to Queue server") #Re-raise exception
+				raise Exception("Error while setting up Socket connection to Queue server") #Re-raise exception for cleanup
 			
 			
 			#Time to pick up some work
@@ -399,13 +403,12 @@ class worker_th(threading.Thread):
 						to_remove = True
 						
 					elif ret_code == 500:
-						worker_th.log_error("Transaction failed with code 500. Try again.",2)
 						
 						if transaction_attempts >= 3:
-							worker_th.log_error("cURL transaction failed. Giving up...",3)
+							worker_th.log_error("Transaction failed with code 500. Giving up on object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL),3)
 							to_remove = True
 						else:
-							worker_th.log_error("cURL transaction failed. Try again.",2)
+							worker_th.log_error("Transaction failed with code 500. Try again.",2)
 						
 					elif ret_code == 503: #Wow,wow...Hold your horses! We probably hit a SlowDown
 						worker_th.log_error("Received 503 from server. Initiating SlowDown and retrying",2)
@@ -422,7 +425,7 @@ class worker_th(threading.Thread):
 						
 					else: #Empty response (DNS/Connect timeout perhaps?)
 						if transaction_attempts >= 3:
-							worker_th.log_error("cURL transaction failed. Giving up...",3)
+							worker_th.log_error("cURL transaction failed. Giving up on object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL),3)
 							to_remove = True
 						else:
 							worker_th.log_error("cURL transaction failed. Trying again.",2)
