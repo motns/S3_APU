@@ -46,7 +46,7 @@ class Feeder:
 		if self.check_missing == 1:
 			# Gets all keys for
 			try:
-				uploaded_keys = s3_listing.list_objects(s3_config.s3_bucket, os.path.join(self.key_root, relative_path, ""), "",1000,"/")
+				uploaded_keys = s3_listing.list_objects(s3_config.s3_bucket, os.path.join(self.key_root, relative_path, ""), "",0,"/")
 			except:
 				print "Failed to get S3 Listing for: "+os.path.join(self.key_root, relative_path, "")
 				uploaded_keys = [] #Degrade gracefully
