@@ -34,3 +34,7 @@ slowdown_time = 15.0
 #Group and User IDs for file uploads
 upload_uid = 1
 upload_gid = 1
+
+#The location for storing the Process ID file
+# "/var/run" should work on most systems, but this might have to be tweaked
+pid_path = "/var/run"

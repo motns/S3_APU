@@ -365,7 +365,7 @@ class S3QueueDaemon(s3_daemon.Daemon):
 # DAEMON STUFF
 
 if __name__ == "__main__":
-	daemon = S3QueueDaemon('/tmp/s3_queue_daemon.pid')
+	daemon = S3QueueDaemon(s3_config.pid_path+'/s3_queue_daemon.pid')
 	if len(sys.argv) == 2:
 		if 'start' == sys.argv[1]:
 				daemon.start()

@@ -137,9 +137,8 @@ class worker_th(threading.Thread):
 			transaction_attempts = 1
 			while 1:
 				
-				multi_curl = pycurl.CurlMulti()
-				multi_curl.setopt(pycurl.M_PIPELINING, 1) #Let's pipe calls, rather than running them in parallel
-				multi_curl.handles = [] #References to original easy curl handles
+				#Array of cURL handles to run
+				curl_handle_stack = [];
 				
 				#Parse work and create cURL easy handles
 				for i in range(len(work_list)):
@@ -315,8 +314,7 @@ class worker_th(threading.Thread):
 						c.setopt(pycurl.CUSTOMREQUEST, "DELETE")
 					
 					#Push onto stack
-					multi_curl.add_handle(c)
-					multi_curl.handles.append(c)
+					curl_handle_stack.append(c);
 					
 					#Update file stats
 					# only on first run
@@ -346,7 +344,7 @@ class worker_th(threading.Thread):
 							worker_th.stat_lock.release()
 				
 				#Check if there's anything to do at all
-				if len(multi_curl.handles) == 0:
+				if len(curl_handle_stack) == 0:
 					break
 				
 				#Check if we have to wait because of a SlowDown in effect
@@ -371,16 +369,12 @@ class worker_th(threading.Thread):
 				start_time = time.time()
 				
 				#Perform requests
-				num_handles = len(multi_curl.handles)
-				while num_handles:
-					while 1:
-						ret, num_handles = multi_curl.perform()
-						if ret != pycurl.E_CALL_MULTI_PERFORM: #Check if we have to run perform again immediately
-							break
+				for c in curl_handle_stack:
+					c.perform()
 				
 				#Check the results
 				work_for_retry = [] #List of instructions to try again
-				for handle in multi_curl.handles:
+				for handle in curl_handle_stack:
 					
 					#Whether to remove this item from the stack
 					to_remove = False
@@ -435,9 +429,7 @@ class worker_th(threading.Thread):
 					if to_remove == False:
 						work_for_retry.append(handle.instruction)
 					
-					#Remove cURL handle from stack and terminate
 					try:
-						multi_curl.remove_handle(handle)
 						handle.close()
 					except: pass
 				
@@ -455,15 +447,6 @@ class worker_th(threading.Thread):
 					worker_th.stat_lock.release()
 				
 				
-				#Close current cURL Multi stack (we'll create a new one later)
-				# This is to prevent timeouts
-				try:
-					multi_curl.close()
-					del(multi_curl)
-				except: pass
-				
-				
-				#If there are no unfinished cURL responses left
 				if len(work_for_retry) == 0: #Halleluja, we're done!
 					break
 				elif transaction_attempts >= 3: #That's enough... :(
@@ -664,7 +647,7 @@ class S3WorkerDaemon(s3_daemon.Daemon):
 # DAEMON STUFF
 
 if __name__ == "__main__":
-	daemon = S3WorkerDaemon('/tmp/s3_worker_daemon.pid')
+	daemon = S3WorkerDaemon(s3_config.pid_path+'/s3_worker_daemon.pid')
 	if len(sys.argv) == 2:
 		if 'start' == sys.argv[1]:
 				daemon.start()
