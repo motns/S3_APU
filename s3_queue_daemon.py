@@ -6,7 +6,7 @@
 
 import s3_daemon
 import s3_config
-import base64, time, socket, sys, threading, Queue
+import base64, re, time, socket, sys, threading, Queue
 
 #########################################################################
 #########################################################################
@@ -31,6 +31,7 @@ class q_accept_th(threading.Thread):
 	total_count = 0
 	mkd_count = 0
 	upl_count = 0
+	cpo_count = 0
 	del_count = 0
 	get_count = 0
 	time_started = time.time()
@@ -57,26 +58,37 @@ class q_accept_th(threading.Thread):
 				#Validate instruction received
 				#
 				# mkd - create folder in S3 (mkd|path/to/dir)
-				# upl - upload file into S3 (upl|/path/to/file|/path/in/s3) 
-				# del - delete file from S3 (del|/path/in/s3) 
+				# upl - upload file into S3 (upl|/path/to/file|path/in/s3)
+				# cpo - copy object within S3 (cpo|/bucket/source/object|destination/path/object)
+				# del - delete file from S3 (del|/path/in/s3)
 				# get - pop out and return the last item from the queue
 				# inf - return information on the current status of the Queue server
 				cmd = msg[0:3]
 				if cmd == 'mkd':
 					try:
-						#Increment stat counters
-						try:
-							q_accept_th.stat_lock.acquire()
-							q_accept_th.total_count += 1
-							q_accept_th.mkd_count += 1
-						finally:
-							q_accept_th.stat_lock.release()
 						
-						#Put in the Queue
-						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
-						
-						#Send confirm
-						self.client.send(base64.b64encode('ok')+"\n")
+						#Validate format
+						# Also checks for leading '/'
+						match = re.match('mkd\|([a-zA-Z0-9\-\_\.\~\/]+)$', msg)
+						if(match != None and match.group(1)[0] != '/'):
+							
+							#Increment stat counters
+							try:
+								q_accept_th.stat_lock.acquire()
+								q_accept_th.total_count += 1
+								q_accept_th.mkd_count += 1
+							finally:
+								q_accept_th.stat_lock.release()
+							
+							#Put in the Queue
+							q_accept_th.queue.put_nowait(msg.split("|"))
+							
+							#Send confirm
+							self.client.send(base64.b64encode('ok')+"\n")
+							
+						else:
+							q_accept_th.log_error('Invalid instruction format: '+msg.strip().replace('\n',' '),1)
+							self.client.send(base64.b64encode('invalid')+"\n")
 						
 					except:
 						q_accept_th.log_error("'mkd' instruction failed: "+msg.strip().replace('\n',' '),2)
@@ -84,39 +96,89 @@ class q_accept_th(threading.Thread):
 					
 				elif cmd == 'upl':
 					try:
-						#Increment stat counters
-						try:
-							q_accept_th.stat_lock.acquire()
-							q_accept_th.total_count += 1
-							q_accept_th.upl_count += 1
-						finally:
-							q_accept_th.stat_lock.release()
 						
-						#Put in the Queue 
-						q_accept_th.queue.put_nowait(msg.split("|")[0:3])
-						
-						#Send confirm
-						self.client.send(base64.b64encode('ok')+"\n")
+						#Validate format
+						# Also checks for leading '/' in object path
+						match = re.match('upl\|([a-zA-Z0-9\-\_\.\~\/]+)\|([a-zA-Z0-9\-\_\.\~\/]+)$', msg)
+						if(match != None and match.group(2)[0] != '/'):
+							
+							#Increment stat counters
+							try:
+								q_accept_th.stat_lock.acquire()
+								q_accept_th.total_count += 1
+								q_accept_th.upl_count += 1
+							finally:
+								q_accept_th.stat_lock.release()
+							
+							#Put in the Queue 
+							q_accept_th.queue.put_nowait(msg.split("|"))
+							
+							#Send confirm
+							self.client.send(base64.b64encode('ok')+"\n")
+							
+						else:
+							q_accept_th.log_error('Invalid instruction format: '+msg.strip().replace('\n',' '),1)
+							self.client.send(base64.b64encode('invalid')+"\n")
 						
 					except:
 						q_accept_th.log_error("'upl' instruction failed: "+msg.strip().replace('\n',' '),2)
 						self.client.send(base64.b64encode('fail')+"\n")
 					
+				elif cmd == 'cpo':
+					try:
+						
+						#Validate format
+						# Also checks for leading '/' in destination object path
+						match = re.match('cpo\|([a-zA-Z0-9\-\_\.\~\/]+)\|([a-zA-Z0-9\-\_\.\~\/]+)$', msg)
+						if(match != None and match.group(2)[0] != '/'):
+							
+							#Increment stat counters
+							try:
+								q_accept_th.stat_lock.acquire()
+								q_accept_th.total_count += 1
+								q_accept_th.cpo_count += 1
+							finally:
+								q_accept_th.stat_lock.release()
+							
+							#Put in the Queue 
+							q_accept_th.queue.put_nowait(msg.split("|"))
+							
+							#Send confirm
+							self.client.send(base64.b64encode('ok')+"\n")
+							
+						else:
+							q_accept_th.log_error('Invalid instruction format: '+msg.strip().replace('\n',' '),1)
+							self.client.send(base64.b64encode('invalid')+"\n")
+						
+					except:
+						q_accept_th.log_error("'cpo' instruction failed: "+msg.strip().replace('\n',' '),2)
+						self.client.send(base64.b64encode('fail')+"\n")
+						
 				elif cmd == 'del':
 					try:
-						#Increment stat counters
-						try:
-							q_accept_th.stat_lock.acquire()
-							q_accept_th.total_count += 1
-							q_accept_th.del_count += 1
-						finally:
-							q_accept_th.stat_lock.release()
 						
-						#Put in the Queue
-						q_accept_th.queue.put_nowait(msg.split("|")[0:2])
-						
-						#Send confirm
-						self.client.send(base64.b64encode('ok')+"\n")
+						#Validate format
+						# Also checks for leading '/'
+						match = re.match('del\|([a-zA-Z0-9\-\_\.\~\/]+)$', msg)
+						if(match != None and match.group(1)[0] != '/'):
+							
+							#Increment stat counters
+							try:
+								q_accept_th.stat_lock.acquire()
+								q_accept_th.total_count += 1
+								q_accept_th.del_count += 1
+							finally:
+								q_accept_th.stat_lock.release()
+							
+							#Put in the Queue
+							q_accept_th.queue.put_nowait(msg.split("|")[0:2])
+							
+							#Send confirm
+							self.client.send(base64.b64encode('ok')+"\n")
+							
+						else:
+							q_accept_th.log_error('Invalid instruction format: '+msg.strip().replace('\n',' '),1)
+							self.client.send(base64.b64encode('invalid')+"\n")
 						
 					except:
 						q_accept_th.log_error("'del' instruction failed: "+msg.strip().replace('\n',' '),2)
@@ -124,47 +186,55 @@ class q_accept_th(threading.Thread):
 						
 				elif cmd == 'get':
 					
-					#Check if we have multiple items to retrieve
-					params = msg.split("|")
-					try:
-						loop = int(params[1] if len(params) == 2 else 1)
-					except:
-						loop = 1
-					
-					#Let's not go crazy!
-					if loop > 30: loop = 30
-					
-					#Try to get the requested number of items
-					item_list = []
-					for i in range(loop):
+					#Validate format
+					match = re.match('get\|([0-9]+)$', msg)
+					if(match != None):
+						
+						#Check if we have multiple items to retrieve
+						params = msg.split("|")
 						try:
-							#Increment stat counters
-							try:
-								q_accept_th.stat_lock.acquire()
-								q_accept_th.total_count += 1
-								q_accept_th.get_count += 1
-							finally:
-								q_accept_th.stat_lock.release()
-								
-							#Only do timeouts if it's the first iteration
-							#  We don't want to waste time when we already have
-							#  something in our list to work with
-							if i == 0:
-								item = q_accept_th.queue.get(True, 10)
-							else:
-								item = q_accept_th.queue.get_nowait()
-							
-							if item != "": item_list.append('|'.join(item))
-							
-						except Queue.Empty: pass
+							loop = int(params[1] if len(params) == 2 else 1)
 						except:
-							q_accept_th.log_error("'get' instruction failed: "+msg.strip().replace('\n',' '),2)
-					
-					#Send back the joined list
-					if len(item_list) > 0:
-						self.client.send(base64.b64encode(";".join(item_list))+"\n")
+							loop = 1
+						
+						#Let's not go crazy!
+						if loop > 30: loop = 30
+						
+						#Try to get the requested number of items
+						item_list = []
+						for i in range(loop):
+							try:
+								#Increment stat counters
+								try:
+									q_accept_th.stat_lock.acquire()
+									q_accept_th.total_count += 1
+									q_accept_th.get_count += 1
+								finally:
+									q_accept_th.stat_lock.release()
+									
+								#Only do timeouts if it's the first iteration
+								#  We don't want to waste time when we already have
+								#  something in our list to work with
+								if i == 0:
+									item = q_accept_th.queue.get(True, 10)
+								else:
+									item = q_accept_th.queue.get_nowait()
+								
+								if item != "": item_list.append('|'.join(item))
+								
+							except Queue.Empty: pass
+							except:
+								q_accept_th.log_error("'get' instruction failed: "+msg.strip().replace('\n',' '),2)
+						
+						#Send back the joined list
+						if len(item_list) > 0:
+							self.client.send(base64.b64encode(";".join(item_list))+"\n")
+						else:
+							self.client.send(base64.b64encode("")+"\n")
+						
 					else:
-						self.client.send(base64.b64encode("")+"\n")
+						q_accept_th.log_error('Invalid instruction format: '+msg.strip().replace('\n',' '),1)
+						self.client.send(base64.b64encode('invalid')+"\n")
 					
 				elif cmd == 'inf':
 					ret = ''
@@ -190,6 +260,7 @@ class q_accept_th(threading.Thread):
 						ret += "|total_cmd:"+str(q_accept_th.total_count)
 						ret += "|mkd_cmd:"+str(q_accept_th.mkd_count)
 						ret += "|upl_cmd:"+str(q_accept_th.upl_count)
+						ret += "|cpo_cmd:"+str(q_accept_th.cpo_count)
 						ret += "|del_cmd:"+str(q_accept_th.del_count)
 						ret += "|get_cmd:"+str(q_accept_th.get_count)
 						ret += "|uptime:"+str(time.time() - q_accept_th.time_started)
