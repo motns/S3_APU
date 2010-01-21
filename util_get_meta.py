@@ -14,5 +14,6 @@ except:
 
 headers = s3_output.get_object_meta(s3_config.s3_bucket, object)
 
-for header in headers:
-	print header+": "+headers[header]
+if headers != 0:
+	for header in headers:
+		print header+": "+headers[header]
