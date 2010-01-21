@@ -9,7 +9,7 @@ import s3_config
 import s3_signature
 import pycurl
 import cStringIO
-import base64, hashlib, os, socket, sys, threading, time
+import base64, hashlib, os, re, socket, sys, threading, time
 
 
 #########################################################################
@@ -35,6 +35,7 @@ class worker_th(threading.Thread):
 	total_count = 0
 	upl_count = 0
 	mkd_count = 0
+	cpo_count = 0
 	del_count = 0
 	time_started = time.time()
 
@@ -79,17 +80,17 @@ class worker_th(threading.Thread):
 					except:
 						worker_th.log_error("Error while connecting to Queue server",2)
 						if i == 2:
-							raise Exception("Failed to establish connection") #Re-raise exception, to trigger cleanup
+							raise CleanupException("Failed to establish connection")
 						else:
 							time.sleep(30)
 				
 				worker_th.debug_step('Thread ID '+str(self.threadnum)+" connected to Queue server")
 				
-			except Exception:
-				raise Exception("Failed to establish connection") #Re-raise exception, to trigger cleanup
+			except CleanupException:
+				raise CleanupException("Failed to establish connection")
 			except:
-				worker_th.log_error("Error while setting up Socket connection to Queue server",3)
-				raise Exception("Error while setting up Socket connection to Queue server") #Re-raise exception for cleanup
+				worker_th.log_error("Unexpected Error while setting up Socket connection to Queue server",3)
+				raise CleanupException("Error while setting up Socket connection to Queue server")
 			
 			
 			#Time to pick up some work
@@ -104,7 +105,7 @@ class worker_th(threading.Thread):
 					if ret == "":
 						if i == 5:
 							#It's enough for now. Stop this thread and start a new one
-							raise Exception("No work to be done")
+							raise CleanupException("No work to be done")
 						else: #Retry in a bit
 							time.sleep(10)
 						
@@ -116,11 +117,11 @@ class worker_th(threading.Thread):
 								work_list.append(ret)
 						break
 				
-			except Exception:
-				raise Exception("No work to be done") #Re-raise exception, to trigger cleanup
+			except CleanupException:
+				raise CleanupException("No work to be done")
 			except:
 				worker_th.log_error("Error while getting and parsing work from Q Server",3)
-				raise Exception("Error while getting and parsing work from Q Server") #Re-raise exception
+				raise CleanupException("Error while getting and parsing work from Q Server")
 			finally:
 				sock.close()
 			
@@ -138,7 +139,7 @@ class worker_th(threading.Thread):
 			while 1:
 				
 				#Array of cURL handles to run
-				curl_handle_stack = [];
+				curl_handle_stack = []
 				
 				#Parse work and create cURL easy handles
 				for i in range(len(work_list)):
@@ -153,14 +154,14 @@ class worker_th(threading.Thread):
 						continue
 					else:
 						cmd = work[0:3]
-						if cmd not in ("mkd","upl","del"): #Validate instructions
+						if cmd not in ("mkd","upl","cpo","del"): #Validate instructions
 							worker_th.log_error("Invalid instruction received",2)
 							continue
 						else:
 							params = work.split("|")
 							
 							#Validate parameter lengths
-							if (cmd in ("mkd","del") and len(params) != 2) or (cmd in ("upl") and len(params) != 3):
+							if (cmd in ("mkd","del") and len(params) != 2) or (cmd in ("upl","cpo") and len(params) != 3):
 								worker_th.log_error("Invalid argument length",2)
 								continue
 							else:
@@ -170,7 +171,7 @@ class worker_th(threading.Thread):
 								if instruction == "mkd" or instruction == "del":
 									source_path = ""
 									destination_key = params[1]
-								elif instruction == "upl":
+								elif instruction == "upl" or instruction == "cpo":
 									source_path = params[1]
 									destination_key = params[2]
 								else:
@@ -241,7 +242,7 @@ class worker_th(threading.Thread):
 						
 						checksum = ""
 						
-					else: #It's a 'del' instruction
+					else: #It's a 'del' or 'cpo' instruction
 						pass
 					
 					#Build Base URI
@@ -250,9 +251,9 @@ class worker_th(threading.Thread):
 					#Create Headers
 					if instruction == "upl" or instruction == "mkd":
 						headers = {
-							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
-							'User-Agent':'S3 APU',
-							'Content-Type':content_type,
+							'Date': time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
+							'User-Agent': 'S3 APU',
+							'Content-Type': content_type,
 							'x-amz-acl':'public-read',
 							'x-amz-meta-gid': str(s3_config.upload_gid),
 							'x-amz-meta-mode': str(meta_mode),
@@ -261,6 +262,16 @@ class worker_th(threading.Thread):
 						}
 						
 						if checksum != "": headers['Content-MD5'] = checksum
+						
+						headers['Authorization'] = s3_signature.get_auth_header('PUT', '/'+s3_config.s3_bucket+'/'+destination_key, headers)
+						
+					elif instruction == "cpo":
+						headers = {
+							'Date':time.strftime("%a, %d %b %Y %H:%M:%S %Z",time.localtime()),
+							'User-Agent':'S3 APU',
+							'x-amz-acl':'public-read',
+							'x-amz-copy-source': source_path
+						}
 						
 						headers['Authorization'] = s3_signature.get_auth_header('PUT', '/'+s3_config.s3_bucket+'/'+destination_key, headers)
 						
@@ -274,7 +285,7 @@ class worker_th(threading.Thread):
 					
 					
 					###########################################################
-					# Initiate cURL object, then put it on MultiCurl stack
+					# Initiate cURL object, then put it on Curl stack
 					
 					c = pycurl.Curl()
 					c.setopt(pycurl.URL, uri)
@@ -301,11 +312,23 @@ class worker_th(threading.Thread):
 					elif instruction == "mkd":
 						c.setopt(pycurl.UPLOAD, 1)
 						
-						#Fake empty file object
+						#Fake empty file object for reading into PUT
 						fake_file = cStringIO.StringIO()
-						
-						#Read file for upload
 						c.setopt(pycurl.READFUNCTION, fake_file.read)
+						
+						# Set size of file to be uploaded.
+						c.setopt(pycurl.INFILESIZE, 0)
+						
+					elif instruction == "cpo":
+						c.setopt(pycurl.UPLOAD, 1)
+						
+						#Fake empty file object for reading into PUT
+						fake_file = cStringIO.StringIO()
+						c.setopt(pycurl.READFUNCTION, fake_file.read)
+						
+						#Record cURL return
+						c.curl_return_body = cStringIO.StringIO()
+						c.setopt(pycurl.WRITEFUNCTION, c.curl_return_body.write)
 						
 						# Set size of file to be uploaded.
 						c.setopt(pycurl.INFILESIZE, 0)
@@ -314,7 +337,7 @@ class worker_th(threading.Thread):
 						c.setopt(pycurl.CUSTOMREQUEST, "DELETE")
 					
 					#Push onto stack
-					curl_handle_stack.append(c);
+					curl_handle_stack.append(c)
 					
 					#Update file stats
 					# only on first run
@@ -326,6 +349,8 @@ class worker_th(threading.Thread):
 							
 							if instruction == "mkd":
 								worker_th.mkd_count += 1
+							elif instruction == "cpo":
+								worker_th.cpo_count += 1
 							elif instruction == "upl":
 								worker_th.upl_count += 1
 								
@@ -384,11 +409,20 @@ class worker_th(threading.Thread):
 					
 					if ret_code in [200,204]: #Success (204 for Deletes, 200 for rest)
 						if ret_code == 200:
-							worker_th.log_event("Successfully uploaded object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL))
+							#Check if we have response body, with an Error in it
+							# This is specifically for COPY operations
+							if hasattr(handle, 'curl_return_body'):
+								if re.search('<Error>', handle.curl_return_body.getvalue()) != None:
+									worker_th.log_error("Error during object COPY transaction: %s" % handle.getinfo(pycurl.EFFECTIVE_URL),2)
+								else:
+									worker_th.log_event("Successfully copied object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL))
+									to_remove = True
+							else:
+								worker_th.log_event("Successfully uploaded object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL))
+								to_remove = True
 						elif ret_code == 204:
 							worker_th.log_event("Successfully deleted object: %s" % handle.getinfo(pycurl.EFFECTIVE_URL))
-						
-						to_remove = True
+							to_remove = True
 						
 					elif ret_code in [400,403,405,411,412,501]: #We must have messed up the Request (Not Recoverable)
 						#@TODO: Maybe try to repair/re-build request based on response received
@@ -450,7 +484,7 @@ class worker_th(threading.Thread):
 				if len(work_for_retry) == 0: #Halleluja, we're done!
 					break
 				elif transaction_attempts >= 3: #That's enough... :(
-					worker_th.log_error("MultiCurl transactions failed 3 times. Giving up...",3)
+					worker_th.log_error("Curl transactions failed 3 times. Giving up...",3)
 					break
 				else:
 					transaction_attempts += 1
@@ -465,8 +499,9 @@ class worker_th(threading.Thread):
 			
 			worker_th.output_stats()
 			
-			
-		except: pass #Lets catch all exceptions for now (@TODO: Unexpected Error logging here)
+		except CleanupException: pass
+		except:
+			worker_th.log_error("Unexpected error while processing cURL transactions: %s" % sys.exc_info()[1], 3)
 		finally:
 			#At the end, clean up after ourselves
 			self.cleanup()
@@ -589,6 +624,7 @@ class worker_th(threading.Thread):
 			
 			ret += "total_cmd:%d" % worker_th.total_count
 			ret += "|mkd_cmd:%d" % worker_th.mkd_count
+			ret += "|cpo_cmd:%d" % worker_th.cpo_count
 			ret += "|upl_cmd:%d" % worker_th.upl_count
 			ret += "|del_cmd:%d" % worker_th.del_count
 			ret += "|uptime:%d" % (time.time() - worker_th.time_started)
@@ -641,6 +677,9 @@ class S3WorkerDaemon(s3_daemon.Daemon):
 			except:
 				worker_th.log_error('Error while setting up new thread',3)
 
+
+class CleanupException(Exception):
+	pass
 
 #########################################################################
 #########################################################################
