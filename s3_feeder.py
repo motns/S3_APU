@@ -4,7 +4,7 @@
 
 import os, socket, base64
 import s3_config
-import s3_listing
+import s3_output
 
 class Feeder:
 	
@@ -49,7 +49,7 @@ class Feeder:
 			# Gets all keys for
 			try:
 				print "Geting S3 listing for: %s" % os.path.join(self.key_root, relative_path, "")
-				uploaded_keys = s3_listing.list_objects(s3_config.s3_bucket, os.path.join(self.key_root, relative_path, ""), "",0,"/")
+				uploaded_keys = s3_output.list_objects(s3_config.s3_bucket, os.path.join(self.key_root, relative_path, ""), "",0,"/")
 			except:
 				print "Failed to get S3 Listing for: "+os.path.join(self.key_root, relative_path, "")
 				uploaded_keys = [] #Degrade gracefully
