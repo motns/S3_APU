@@ -22,9 +22,10 @@ Table of Contents:
 5. Internal "instruction" API
 	5.1 mkd
 	5.2 upl
-	5.3 del
-	5.4 get
-	5.5 inf
+	5.3 cpo
+	5.4 del
+	5.5 get
+	5.6 inf
 
 
 1. Description
@@ -106,7 +107,7 @@ be accessed using the Queue Status utility (see section 4.3)
 3.2 S3 Worker Daemon:
 --------------------------------------------------------------------------------
 
-A multi-threaded upload service based on Multi cURL (PyCurl). It connects to the
+A multi-threaded upload service based on cURL (PyCurl). It connects to the
 S3 Queue service, and retrieves a list of instructions to execute against S3.
 These will tell the worker to either: create a new folder, upload a file or delete
 a file. The number of instructions it retrieves in one go, and the number of
@@ -121,10 +122,6 @@ However, this could reduce the responsiveness of the uploader, since it won't
 grab new instructions until it's done with the current ones. To make it faster
 to resond (but slower to upload), just increase the 'max_workers' (to 5 or 6),
 and reduce the 'max_files' (to 5 or so).
-
-The one thing to keep in mind is that Multi cURL tends to use a lot of CPU
-(due to IO waits I believe) while running, so be careful with how many workers
-are set off to run!
 
 The Worker daemon will handle any errors coming from S3, and will log them in the
 s3_worker_error log file. If the error is recoverable (e.g. a network timeout),
@@ -226,6 +223,7 @@ th_count: The number of queue threads sending/receiving instructions at the mome
 total_cmd: The total number of instructions received
 mkd_cmd: The total number of 'make directory' instructions
 upl_cmd: The total number of 'upload file' instructions
+cpo_cmd: The total number of 'copy object' instructions
 get_cmd: The total number of 'get work' instructions
 uptime: The number of seconds passed since the service was started
 
@@ -238,9 +236,9 @@ The Queue and Worker services use a pre-defined set of 'instructions' to communi
 Instructions begin with a 3 character command, and then contain a list of
 parameters in a '|' separated format. The Queue receives and sends data in
 base64 encoded format. After it receives a valid instruction, the queue will
-respond with an 'ok' to confirm that the command was successfully stored. Upon
-failure the queue responds with 'fail', while validation errors will return 'fail'.
-Both errors and failures are also logged in the s3_queue_error log.
+respond with an 'ok' to confirm that it was successfully stored. Upon
+failure the queue responds with 'fail', while validation errors will return 'invalid'.
+Both errors and validation failures are also logged in the s3_queue_error log.
 
 
 5.1 mkd
@@ -255,7 +253,7 @@ compatibility with current S3 access implementations (like s3fs).
 Headers
 --------
 Content-Type: application/x-directory
-x-amz-acl: public
+x-amz-acl: public-read
 x-amz-meta-uid: [As defined in s3_config]
 x-amz-meta-gid: [As defined in s3_config]
 x-amz-meta-mode: 040755 (Mode for folder node at 775 access permissions in Linux)
@@ -298,7 +296,7 @@ The headers are almost the same as for a folder, except that the mode is adjuste
 Headers
 --------
 Content-Type: [As determined above]
-x-amz-acl: public
+x-amz-acl: public-read
 x-amz-meta-uid: [As defined in s3_config]
 x-amz-meta-gid: [As defined in s3_config]
 x-amz-meta-mode: 0100755 (Mode for file node at 775 access permissions in Linux)
@@ -318,7 +316,34 @@ Will create object: http://yourbucket.s3.amazonaws.com/key/for/destination
 PLEASE NOTE: Once again, there's no '/' at the beginning.
 
 
-5.3 del
+5.3 cpo
+--------------------------------------------------------------------------------
+
+Instructs the worker to run a COPY operation on Amazon S3. It takes the source
+bucket and key as its first argument, and the destination key as the second one.
+It can copy from any bucket the configured user has access to, and will create
+the resulting object in the bucket previously selected in the configuration file.
+
+This will essentially run a PUT operation without posting anything.
+
+
+Headers
+--------
+x-amz-acl: public-read,
+x-amz-copy-source: [source in '/bucket/object' format]
+
+
+Usage
+--------
+cpo|/bucket/object/path|new/object/path
+
+Will create object: http://yourbucket.s3.amazonaws.com/new/object/path
+
+PLEASE NOTE: There IS a leading '/' in the source path (preceding the bucket name),
+but there ISN'T one in the destination object path.
+
+
+5.4 del
 --------------------------------------------------------------------------------
 
 Used to delete an object from Amazon S3. Takes the destination key as it's
@@ -339,7 +364,7 @@ Will remove object: http://yourbucket.s3.amazonaws.com/key/to/delete
 PLEASE NOTE: Once again, there's no '/' at the beginning.
 
 
-5.4 get
+5.5 get
 --------------------------------------------------------------------------------
 
 Used to retrieve one or more items from the Queue. Takes the number of items as
@@ -357,7 +382,7 @@ May return something like this:
 mkd|newfolder;upl|/source|destination
 
 
-5.5 inf
+5.6 inf
 --------------------------------------------------------------------------------
 
 Used to get information about the internal state of the Queue. Takes no arguments.
