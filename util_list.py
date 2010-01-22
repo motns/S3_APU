@@ -16,6 +16,14 @@ try:
 	limit = int(sys.argv[2])
 except: limit = 0
 	
+#Little hack for convenience
+# Will use the first argument as 'limit', if it doesn't look like a path
+if prefix != "" and prefix[-1] != "/" and len(sys.argv) == 2:
+	try:
+		limit = int(prefix)
+		prefix = ""
+	except: pass
+	
 try:
 	bucket = str(sys.argv[3]).strip()
 	if re.match('[a-zA-Z0-9\-\_\.]+$', bucket) == None:
@@ -23,16 +31,9 @@ try:
 		raise Exception("Invalid")
 except:
 	bucket = s3_config.s3_bucket
+
 	
-#Little hack for convenience
-# Will use the first argument as 'limit', if it doesn't look like a path
-if prefix != "" and prefix[-1] != "/":
-	try:
-		limit = int(prefix)
-		prefix = ""
-	except: pass
-	
-out = s3_output.list_objects(bucket, os.path.join(prefix, ''), "", limit, "/")
+out = s3_output.list_objects(bucket, prefix, "", limit, "/")
 if out != None and out != 0:
 	for k in out:
 		print k
