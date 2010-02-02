@@ -393,13 +393,24 @@ class worker_th(threading.Thread):
 				
 				start_time = time.time()
 				
+				work_for_retry = [] #List of instructions to try again
+				
+				#Store the list of cURL handles with (supposedly) successful transactions
+				# We'll have a closer look at these in the next section
+				# The rest of them will automatically go on the retry list
+				curl_tocheck_stack = []
+				
 				#Perform requests
-				for c in curl_handle_stack:
-					c.perform()
+				for handle in curl_handle_stack:
+					try:
+						handle.perform()
+						curl_tocheck_stack.append(handle)
+					except:
+						worker_th.log_error("Communication error while performing cURL transaction: %s" % sys.exc_info()[1], 2)
+						work_for_retry.append(handle.instruction)
 				
 				#Check the results
-				work_for_retry = [] #List of instructions to try again
-				for handle in curl_handle_stack:
+				for handle in curl_tocheck_stack:
 					
 					#Whether to remove this item from the stack
 					to_remove = False
@@ -410,7 +421,7 @@ class worker_th(threading.Thread):
 					if ret_code in [200,204]: #Success (204 for Deletes, 200 for rest)
 						if ret_code == 200:
 							#Check if we have response body, with an Error in it
-							# This is specifically for COPY operations
+							# This is specific to COPY operations
 							if hasattr(handle, 'curl_return_body'):
 								if re.search('<Error>', handle.curl_return_body.getvalue()) != None:
 									worker_th.log_error("Error during object COPY transaction: %s" % handle.getinfo(pycurl.EFFECTIVE_URL),2)

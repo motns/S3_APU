@@ -2,30 +2,34 @@ S3_APU:
 Asynchronous Upload tool for Amazon's Simple Storage Service (S3)
 ================================================================================
 
-Author:
-    Adam Borocz (http://github.com/motns)
+Author: Adam Borocz (http://github.com/motns)
+Version: 1.2.6.2
+License: GPL version 3
 
 ================================================================================
 
 Table of Contents:
 
 1. Description
-2. Requirements and Installation
-3. Components
-	3.1 S3 Queue Daemon (s3_queue_daemon)
-	3.2 S3 Worker Daemon (s3_worker_daemon)
-	3.3 S3 Feeder
-4. Usage
-	4.1 The feeder utility (util_feed)
-	4.2 The list utility (util_list)
-	4.3 The status utility (util_q_status)
-5. Internal "instruction" API
-	5.1 mkd
-	5.2 upl
-	5.3 cpo
-	5.4 del
-	5.5 get
-	5.6 inf
+
+2. Components
+	2.1 S3 Queue Daemon (s3_queue_daemon)
+	2.2 S3 Worker Daemon (s3_worker_daemon)
+	2.3 S3 Feeder
+	
+3. Usage
+	3.1 The feeder utility (util_feed)
+	3.2 The list utility (util_list)
+	3.3 The alternative list utility (util_list_noseparator)
+	3.4 The status utility (util_q_status)
+	
+4. Internal "instruction" API
+	4.1 mkd
+	4.2 upl
+	4.3 cpo
+	4.4 del
+	4.5 get
+	4.6 inf
 
 
 1. Description
@@ -39,47 +43,11 @@ can view it properly. The system is essentially based on the interaction of
 3 components: Queue, Worker and Feed (see section 3 for details).
 
 
-2. Requirements and Installation
-================================================================================
-
-If you don't have an Amazon S3 account (or have no idea what it is), perhaps you
-should first have a look around on this site: http://aws.amazon.com/s3
-
-S3 APU requires:
-- Python 2.6
-- PyCurl 7.19.0 (available from: http://pycurl.sourceforge.net/)
-
-To run S3 APU, a configuration file needs to be created first. There's an example
-located in the main folder (s3_config_example) which can be used. Just copy its
-contents into 's3_config' and go from there.
-The Amazon S3 access details need to be entered first for the uploader to work.
-A bucket to upload into will also have to be specified. S3 APU only supports one
-destination bucket at the moment.
-
-(!)PLEASE NOTE: If changes are made to the configuration file, they won't
-take effect until the services are restarted.
-
-When ready, just fire up the Queue and the Worker (from the main folder):
-
-./s3_queue_daemon start
-./s3_worker_daemon start
-
-
-(!)PLEASE NOTE:
-If there are multiple versions of python installed, it might be required to tweak the
-first line of each file listed above, to point to the correct one.
-
-Optionally (on Red Hat, Fedora and Cent OS), these two files can be symlinked into 
-the '/etc/init.d' folder, so the 'chckconfig' and 'service' commands can be used
-to manage them.
-
-
-
-3. Components
+2. Components
 ================================================================================
 
 
-3.1 S3 Queue Daemon (s3_queue_daemon):
+2.1 S3 Queue Daemon (s3_queue_daemon):
 --------------------------------------------------------------------------------
 
 A socket-based, multi-threaded, asynchronous queue service. It binds to localhost
@@ -104,7 +72,7 @@ be accessed using the Queue Status utility (see section 4.3)
 
 
 
-3.2 S3 Worker Daemon:
+2.2 S3 Worker Daemon:
 --------------------------------------------------------------------------------
 
 A multi-threaded upload service based on cURL (PyCurl). It connects to the
@@ -139,7 +107,7 @@ PLEASE NOTE, that currently all objects are uploaded as publicly accessible!
 
 
 
-3.3 S3 Feeder:
+2.3 S3 Feeder:
 --------------------------------------------------------------------------------
 
 The S3 Feeder is a class, used to work sort of like the rsync utility in Linux.
@@ -151,11 +119,11 @@ the current folder, or traverse through the entire tree.
 
 
 
-4. Usage
+3. Usage
 ================================================================================
 
 
-4.1 The feeder utility (util_feed)
+3.1 The feeder utility (util_feed)
 --------------------------------------------------------------------------------
 
 The feeder utility is a CLI front-end to the S3 Feeder class. It takes its arguments
@@ -184,13 +152,13 @@ much faster, but might waste bandwidth by uploading existing objects again.
 
 
 
-4.2 The list utility (util_list)
+3.2 The standard list utility (util_list)
 --------------------------------------------------------------------------------
 
 Very simple CLI front-end to the internal S3 listing function. It will list all
 the keys with a certain prefix, using "/" as a separator:
 
-./util_list PREFIX [LIMIT]
+./util_list PREFIX [LIMIT] [BUCKET]
 
 PREFIX:
 The Key prefix to use, without a trailing '/'. So to list the contents of the
@@ -202,12 +170,25 @@ Limits the number of keys returned:
 0 -> Get all the keys (Could take a while for large folders!)
 > 1 -> Get specified anount
 
+BUCKET:
+An alternative bucket to list objects from. Please note however, that this will
+only work if the S3 credentials being used have permissions to access that bucket.
+
 This function will also compensate for the problem of S3 returning less than the
 requested number of keys, even through there's more available.
 
 
 
-4.3 The status utility (util_q_status)
+3.3 The alternative list utility (util_list_noseparator)
+--------------------------------------------------------------------------------
+
+Identical in functionality to the standard listing utility, except that it uses
+no separator. This will essentially provide an unrestricted lexical listing of
+object keys in the bucket.
+
+
+
+3.4 The status utility (util_q_status)
 --------------------------------------------------------------------------------
 
 A simple utility, used to query the S3 Queue for it's current status. Just run
@@ -229,7 +210,7 @@ uptime: The number of seconds passed since the service was started
 
 
 
-5. Internal "instruction" API
+4. Internal "instruction" API
 ================================================================================
 
 The Queue and Worker services use a pre-defined set of 'instructions' to communicate.
@@ -241,7 +222,7 @@ failure the queue responds with 'fail', while validation errors will return 'inv
 Both errors and validation failures are also logged in the s3_queue_error log.
 
 
-5.1 mkd
+4.1 mkd
 --------------------------------------------------------------------------------
 
 Instructs the worker to create a new folder in S3. Since Amazon S3 has no concept
@@ -269,7 +250,7 @@ PLEASE NOTE: There's no '/' at the beginning! Otherwise you could end up with tw
 slashes in your URL.
 
 
-5.2 upl
+4.2 upl
 --------------------------------------------------------------------------------
 
 Instructs the worker to upload a file into S3. Takes the source path and
@@ -316,7 +297,7 @@ Will create object: http://yourbucket.s3.amazonaws.com/key/for/destination
 PLEASE NOTE: Once again, there's no '/' at the beginning.
 
 
-5.3 cpo
+4.3 cpo
 --------------------------------------------------------------------------------
 
 Instructs the worker to run a COPY operation on Amazon S3. It takes the source
@@ -343,7 +324,7 @@ PLEASE NOTE: There IS a leading '/' in the source path (preceding the bucket nam
 but there ISN'T one in the destination object path.
 
 
-5.4 del
+4.4 del
 --------------------------------------------------------------------------------
 
 Used to delete an object from Amazon S3. Takes the destination key as it's
@@ -364,7 +345,7 @@ Will remove object: http://yourbucket.s3.amazonaws.com/key/to/delete
 PLEASE NOTE: Once again, there's no '/' at the beginning.
 
 
-5.5 get
+4.5 get
 --------------------------------------------------------------------------------
 
 Used to retrieve one or more items from the Queue. Takes the number of items as
@@ -382,7 +363,7 @@ May return something like this:
 mkd|newfolder;upl|/source|destination
 
 
-5.6 inf
+4.6 inf
 --------------------------------------------------------------------------------
 
 Used to get information about the internal state of the Queue. Takes no arguments.

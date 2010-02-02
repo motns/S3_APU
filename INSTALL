@@ -1,0 +1,51 @@
+S3_APU:
+Asynchronous Upload tool for Amazon's Simple Storage Service (S3)
+================================================================================
+
+Author: Adam Borocz (http://github.com/motns)
+Version: 1.2.6.2
+License: GPL version 3
+
+================================================================================
+
+1. Requirements
+================================================================================
+
+If you don't have an Amazon S3 account (or have no idea what it is), perhaps you
+should first have a look around on this site: http://aws.amazon.com/s3
+
+S3 APU requires to run:
+- Python 2.5.2 or higher
+- PyCurl 7.18.2 or higher (available from: http://pycurl.sourceforge.net/)
+
+NOTE: It may actually work on earlier versions of PyCurl, but 7.18.2 is the
+oldest one that S3 APU was tested with.
+
+
+2. Initial Configuration
+================================================================================
+
+To run S3 APU, a configuration file needs to be created first. There's an
+example located in the main folder (s3_config_example) which can be used. Just
+copy its contents into a file called 's3_config.py' and go from there.
+
+The Amazon S3 access keys, and the default bucket name need to be entered in the
+configuration file first for the uploader to work.
+S3 APU only supports one destination bucket for uploading at the moment.
+
+(!)PLEASE NOTE: If changes are made to the configuration file, they won't
+take effect until the services are restarted.
+
+
+3. Starting Services
+================================================================================
+
+When ready, just fire up the Queue and the Worker (from the S3_APU root folder):
+
+./s3_queue_daemon start
+./s3_worker_daemon start
+
+
+Optionally (on Red Hat, Fedora and Cent OS), these two files can be symlinked into 
+the '/etc/init.d' folder, so the 'chckconfig' and 'service' commands can be used
+to manage them.
