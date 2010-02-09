@@ -1,4 +1,4 @@
-S3 APU 1.2.6.2 - 02/02/2010
+S3 APU 1.2.6.3 - 09/02/2010
 ============================
 
 Major internal changes and New features
@@ -34,3 +34,6 @@ Bug fixes
 * Communication errors during the cURL perform phase are now caught
 
 * Common prefixes are now included in the standard S3 listing output
+
+* The Worker no longer skips a whole block of instructions, if there's just a
+single missing file in there

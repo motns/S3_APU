@@ -219,13 +219,15 @@ class worker_th(threading.Thread):
 						
 						#Check if file exists
 						# Retry 3 times if missing - To get around race conditions
-						for r in range(3):
-							if os.path.exists(source_path) == False:
-								if r >= 2:
-									raise Exception("The file specified doesn't exist")
-								else:
-									time.sleep(5)
-							else: break
+						try:
+							for r in range(3):
+								if os.path.exists(source_path) == False:
+									if r >= 2:
+										raise Exception("The file specified doesn't exist")
+									else:
+										time.sleep(5)
+								else: break
+						except: continue #Skip this instruction
 						
 						#Get file checksum
 						checksum = base64.b64encode(
@@ -396,7 +398,7 @@ class worker_th(threading.Thread):
 				work_for_retry = [] #List of instructions to try again
 				
 				#Store the list of cURL handles with (supposedly) successful transactions
-				# We'll have a closer look at these in the next section
+				# We'll have a closer look at these in the next block
 				# The rest of them will automatically go on the retry list
 				curl_tocheck_stack = []
 				
@@ -408,6 +410,12 @@ class worker_th(threading.Thread):
 					except:
 						worker_th.log_error("Communication error while performing cURL transaction: %s" % sys.exc_info()[1], 2)
 						work_for_retry.append(handle.instruction)
+						
+						#Just in case
+						try:
+							handle.close()
+						except: pass
+				
 				
 				#Check the results
 				for handle in curl_tocheck_stack:
