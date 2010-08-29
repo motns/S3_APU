@@ -2,7 +2,7 @@
 #
 # Get Status for running Q Daemon
 
-import s3_config
+from s3_apu.conf import s3_config
 import base64, socket
 
 try:

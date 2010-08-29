@@ -4,9 +4,9 @@
 # description: Multi-threaded cURL-based uploader for S3
 # processname: s3_worker_daemon
 
-import s3_daemon
-import s3_config
-import s3_signature
+from s3_apu.lib import s3_daemon
+from s3_apu.conf import s3_config
+from s3_apu.lib import s3_signature
 import pycurl
 import cStringIO
 import base64, hashlib, os, re, socket, sys, threading, time

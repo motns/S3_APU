@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import os, sys
-import s3_feeder
+from s3_apu.lib import s3_feeder
 
 #Get and validate feed path
 try:

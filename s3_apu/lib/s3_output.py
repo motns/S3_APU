@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import s3_config
+from ..conf import s3_config
 import s3_signature
 import pycurl
 import time, cStringIO

@@ -4,8 +4,8 @@
 # description: A high-speed multi-threaded queueing system, supporting the S3 APU application
 # processname: s3_queue_daemon
 
-import s3_daemon
-import s3_config
+from s3_apu.lib import s3_daemon
+from s3_apu.conf import s3_config
 import base64, re, time, socket, sys, threading, Queue
 
 #########################################################################

@@ -3,7 +3,7 @@
 # Also has option to only upload missing items
 
 import os, socket, base64
-import s3_config
+from ..conf import s3_config
 import s3_output
 
 class Feeder:

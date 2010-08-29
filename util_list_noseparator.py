@@ -3,8 +3,8 @@
 # Simple CLI front-end for s3_output class
 # Lists keys with a certain prefix
 
-import s3_config
-import s3_output
+from s3_apu.conf import s3_config
+from s3_apu.lib import s3_output
 import os, re, sys
 
 try:
